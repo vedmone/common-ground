@@ -1,0 +1,44 @@
+import { Check, Undo2, PenLine, GitCompareArrows, Navigation } from 'lucide-react';
+import { clip } from '../lib/util.js';
+
+export default function ActionBar({ version, index, onKeep, onUndo, onRefine, onShowChanges, onTour }) {
+  const count = version.changes?.length || version.sourceChanges?.length || 0;
+  return (
+    <div className="action-bar" role="region" aria-label={`Review version ${index}`}>
+      <div className="ab-info">
+        <span className="ab-badge">v{index}</span>
+        <div className="ab-text">
+          <b>{clip(version.summary, 54)}</b>
+          <small>
+            {version.origin === 'companion' ? 'Applied to your local files' : version.origin === 'demo' ? 'Scripted demo edit' : 'Live in the preview'}
+            {count ? ` · ${count} change${count > 1 ? 's' : ''}` : ''}
+          </small>
+        </div>
+      </div>
+      <div className="ab-actions">
+        {version.changes?.length > 0 && (
+          <button type="button" className="btn btn-quiet btn-sm" onClick={onTour} title="Ground points at what changed">
+            <Navigation size={14} aria-hidden="true" />
+            <span className="hide-sm">Walk me through</span>
+          </button>
+        )}
+        <button type="button" className="btn btn-quiet btn-sm" onClick={onShowChanges}>
+          <GitCompareArrows size={14} aria-hidden="true" />
+          <span className="hide-sm">Changes</span>
+        </button>
+        <button type="button" className="btn btn-quiet btn-sm" onClick={onRefine}>
+          <PenLine size={14} aria-hidden="true" />
+          <span>Refine</span>
+        </button>
+        <button type="button" className="btn btn-outline btn-sm" onClick={onUndo}>
+          <Undo2 size={14} aria-hidden="true" />
+          <span>Undo</span>
+        </button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={onKeep}>
+          <Check size={14} aria-hidden="true" />
+          <span>Keep</span>
+        </button>
+      </div>
+    </div>
+  );
+}

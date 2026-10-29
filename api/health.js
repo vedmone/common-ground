@@ -1,0 +1,1 @@
+export default function handler(req,res){res.setHeader('Cache-Control','no-store');res.status(200).json({ok:true,chat:!!process.env.SARVAM_API_KEY,voice:!!process.env.SARVAM_API_KEY,provider:'Sarvam',version:'0.1.0'});}
