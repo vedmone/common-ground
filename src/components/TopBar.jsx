@@ -5,8 +5,8 @@ import { cx } from '../lib/util.js';
 
 function StatusPill({ health, companion, onRetry }) {
   let tone = 'ok';
-  let label = health.provider ? `${health.provider} ready` : 'AI ready';
-  let detail = 'Chat, transcription and voice are available.';
+  let label = 'Voice ready';
+  let detail = 'Conversation, listening and spoken replies are available.';
   if (health.status === 'checking') {
     tone = 'wait';
     label = 'Checking services';

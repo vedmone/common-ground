@@ -40,7 +40,7 @@ export default function Welcome({ onEnter, onDemo }) {
             </p>
             <div className="welcome-actions">
               <button ref={enterRef} type="button" className="btn btn-primary btn-lg" onClick={onEnter}>
-                Enter studio
+                Join voice room
                 <ArrowRight size={18} aria-hidden="true" />
               </button>
               <button type="button" className="btn btn-quiet btn-lg" onClick={onDemo}>
@@ -48,7 +48,7 @@ export default function Welcome({ onEnter, onDemo }) {
                 Try a guided session
               </button>
             </div>
-            <p className="welcome-fine">The guided session is a scripted demonstration and makes no AI calls. Everything in the studio is live.</p>
+            <p className="welcome-fine">Speak in your language. Ground detects it automatically, even when you switch. The guided session is a scripted demonstration.</p>
           </div>
 
           <figure className="welcome-vignette" aria-label="Illustration: your cursor and Ground’s cursor on the same page">

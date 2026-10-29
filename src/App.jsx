@@ -3,14 +3,14 @@ import TopBar from './components/TopBar.jsx';
 import Welcome from './components/Welcome.jsx';
 import PreviewStage from './components/PreviewStage.jsx';
 import Conversation from './components/Conversation.jsx';
-import CallDock from './components/CallDock.jsx';
+import VoiceRoom from './components/VoiceRoom.jsx';
 import ActionBar from './components/ActionBar.jsx';
 import SourceDrawer from './components/SourceDrawer.jsx';
 import HistoryPanel from './components/HistoryPanel.jsx';
 import SetupPanel from './components/SetupPanel.jsx';
 import HelpPanel from './components/HelpPanel.jsx';
 import TourBanner from './components/TourBanner.jsx';
-import { ConfirmDialog, Toasts } from './components/Feedback.jsx';
+import { ConfirmDialog, Toasts, Sheet } from './components/Feedback.jsx';
 import { SAMPLE_PROJECTS, COMPANION_PROJECT, projectById } from './samples/index.js';
 import { loadSettings, saveSettings, loadSession, saveSession, clearSession } from './lib/storage.js';
 import { api, companionApi, isAbort } from './lib/api.js';
@@ -20,7 +20,7 @@ import { PointerTour, resolveTargets } from './lib/tour.js';
 import { VoiceSession, voiceSupport, micErrorMessage } from './lib/voice.js';
 import { SpeechPlayer } from './lib/player.js';
 import { DEMO_STEPS } from './lib/demo.js';
-import { uid, clip, UNDO_RE, STOP_RE, describeElement } from './lib/util.js';
+import { uid, clip, UNDO_RE, STOP_RE, KEEP_RE, commandReply, describeElement } from './lib/util.js';
 
 /* ---------------- session helpers ---------------- */
 
@@ -117,6 +117,7 @@ export default function App() {
   const [confirm, setConfirm] = useState(null);
   const [composerSeed, setComposerSeed] = useState(null);
   const [speakingMessageId, setSpeakingMessageId] = useState(null);
+  const [detectedLanguage, setDetectedLanguage] = useState(null);
 
   const store = useMemo(() => createBridgeStore(), []);
   const bridge = useSyncExternalStore(store.subscribe, store.getSnapshot);
@@ -361,7 +362,7 @@ export default function App() {
         speakCtrlRef.current?.abort();
         return;
       }
-      speakText(message.content, { messageId: message.id });
+      speakText(message.content, { messageId: message.id, language: message.language });
     },
     [player, speakText, speakingMessageId],
   );
@@ -449,7 +450,18 @@ export default function App() {
       if (UNDO_RE.test(text)) {
         interrupt({ silent: true });
         appendMessages(userMsg);
-        await undo({ announce: true });
+        const didUndo = await undo({ announce: true });
+        if (didUndo && L.call.active && !L.call.speakerMuted) speakText(commandReply('undo', opts.language), { language: opts.language });
+        return;
+      }
+      const lastReply = [...L.session.messages].reverse().find((m) => m.role === 'assistant');
+      if (KEEP_RE.test(text) && currentOf(L.session).status === 'pending' && lastReply?.action !== 'clarify') {
+        interrupt({ silent: true });
+        appendMessages(userMsg);
+        keep();
+        const reply = commandReply('keep', opts.language);
+        appendMessages({ id: uid('m'), role: 'assistant', content: reply, at: Date.now(), local: true });
+        if (L.call.active && !L.call.speakerMuted) speakText(reply, { language: opts.language });
         return;
       }
       if (STOP_RE.test(text)) {
@@ -525,7 +537,7 @@ export default function App() {
     },
     // handleResult is defined below and read through a ref to avoid a dependency cycle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [appendMessages, captureReference, finishTurn, interrupt, player, requestSnapshot, store, tour, undo],
+    [appendMessages, captureReference, finishTurn, interrupt, keep, player, requestSnapshot, speakText, store, tour, undo],
   );
   runTurnRef.current = sendTurn;
 
@@ -535,7 +547,23 @@ export default function App() {
   }
 
   handleResultRef.current = async (result, { id, projectAtStart, parent, language }) => {
-    const action = ['none', 'point', 'clarify', 'edit'].includes(result?.action) ? result.action : 'none';
+    const action = ['none', 'point', 'clarify', 'edit', 'keep', 'undo', 'stop', 'end_call'].includes(result?.action) ? result.action : 'none';
+    if (action === 'end_call') {
+      const readGoodbye = live.current.call.active && !live.current.call.speakerMuted;
+      endCall();
+      const content = String(result.reply || 'The call has ended. Your work is still here.');
+      appendMessages({ id: uid('m'), role: 'assistant', content, language, at: Date.now(), local: true });
+      if (readGoodbye) speakText(content, { language });
+      return;
+    }
+    if (['keep', 'undo', 'stop'].includes(action)) {
+      if (action === 'keep' && currentOf(live.current.session).status === 'pending') keep();
+      if (action === 'undo' && !(await undo())) return;
+      const content = String(result.reply || commandReply(action, language));
+      appendMessages({ id: uid('m'), role: 'assistant', content, at: Date.now(), local: true });
+      if (live.current.call.active && !live.current.call.speakerMuted) speakText(content, { language });
+      return;
+    }
     const reply = String(result?.reply || '').trim() || 'Done.';
     const changes = Array.isArray(result?.changes) ? result.changes.filter((c) => c && typeof c === 'object').slice(0, 8) : [];
     const rawTargets = Array.isArray(result?.targets) ? result.targets.filter((t) => t && typeof t === 'object').slice(0, 6) : [];
@@ -612,6 +640,7 @@ export default function App() {
       targets: targets.map((t) => ({ id: t.id, label: clip(t.label, 80) })),
       versionId,
       provider: String(result?.provider || ''),
+      language,
     };
     appendMessages(msg);
     if (editError) note(editError, 'error');
@@ -647,7 +676,9 @@ export default function App() {
           interrupt();
           return;
         }
-        const language = /^hi/i.test(String(r.language_code || '')) ? 'hi-IN' : undefined;
+        const detected = String(r.language_code || '');
+        const language = /^(en|hi|bn|gu|kn|ml|mr|od|pa|ta|te)-IN$/.test(detected) ? detected : 'auto';
+        if (language !== 'auto') setDetectedLanguage(language);
         await runTurnRef.current(text, { via: 'voice', reference, language });
       } catch (e) {
         if (!isAbort(e)) note(`Transcription failed: ${e.message}`, 'error');
@@ -666,7 +697,14 @@ export default function App() {
       toast(support.reason, 'error');
       return;
     }
-    const { health: h, companion: comp } = live.current;
+    let { health: h, companion: comp } = live.current;
+    if (h.status === 'checking') {
+      try {
+        const ready = await api.health();
+        h = { status: 'ok', chat: !!ready.chat, voice: !!ready.voice, provider: ready.provider || '' };
+        setHealth(h);
+      } catch { /* The existing service status supplies the user-facing error below. */ }
+    }
     if (!h.voice && !(comp.status === 'connected' && comp.info?.voice)) {
       const reason = h.status === 'error' ? 'The voice service is unreachable right now.' : 'Voice is not configured on this server yet.';
       setCall((c) => ({ ...c, error: reason }));
@@ -682,10 +720,8 @@ export default function App() {
       },
       onSpeechStart: (segmentId) => {
         utterRefs.current.set(segmentId, captureReference());
-        if (player.playing) {
-          player.stop();
-          speakCtrlRef.current?.abort();
-        }
+        player.stop();
+        speakCtrlRef.current?.abort();
       },
       onUtterance: (blob, meta) => {
         let reference = utterRefs.current.get(meta.segmentId) || captureReference();
@@ -697,22 +733,34 @@ export default function App() {
         transcribeAndSend(blob, meta.filename, reference);
       },
       onError: (e) => {
-        toast(micErrorMessage(e), 'error', 7000);
+        const message = micErrorMessage(e);
+        voiceRef.current?.stop();
+        voiceRef.current = null;
+        player.stop();
+        speakCtrlRef.current?.abort();
+        setCall((c) => ({ ...c, active: false, connecting: false, state: 'off', error: message }));
+        toast(message, 'error', 7000);
       },
     });
     voiceRef.current = vs;
     try {
       await vs.start({ handsFree: live.current.settings.handsFree });
+      if (voiceRef.current !== vs || vs.closed) return;
       vs.setPlayback(player.playing);
       setCall({ active: true, connecting: false, state: vs.state, muted: false, speakerMuted: false, error: '' });
+      const greeting = 'Hi, I’m Ground. Point at something and tell me what you’d like to change. Speak in whichever language feels natural.';
+      const greetingId = uid('m');
+      appendMessages({ id: greetingId, role: 'assistant', content: greeting, language: 'en-IN', at: Date.now(), local: true });
+      speakText(greeting, { messageId: greetingId, language: 'en-IN' });
     } catch (e) {
+      if (voiceRef.current !== vs) return;
       vs.stop();
       voiceRef.current = null;
       const message = micErrorMessage(e);
       setCall({ active: false, connecting: false, state: 'off', muted: false, speakerMuted: false, error: message });
       toast(message, 'error', 8000);
     }
-  }, [captureReference, player, toast, transcribeAndSend]);
+  }, [appendMessages, captureReference, player, speakText, toast, transcribeAndSend]);
 
   const endCall = useCallback(() => {
     voiceRef.current?.stop();
@@ -955,7 +1003,8 @@ export default function App() {
       return true;
     }
     if (key === '/' && !meta) {
-      composerRef.current?.focus();
+      setPanel('transcript');
+      setTimeout(() => composerRef.current?.focus(), 100);
       return true;
     }
     if ((key === 'z' || key === 'Z') && meta && !shift) {
@@ -988,7 +1037,8 @@ export default function App() {
   const enterStudio = useCallback(() => {
     setWelcome(false);
     updateSettings({ welcomeSeen: true });
-  }, [updateSettings]);
+    startCall();
+  }, [startCall, updateSettings]);
 
   const exportProject = isCompanion ? { ...COMPANION_PROJECT, name: companion.info?.project ? String(companion.info.project) : COMPANION_PROJECT.name } : project;
 
@@ -1029,19 +1079,19 @@ export default function App() {
             reviewMode={reviewMode}
             onReviewMode={setReviewMode}
             onSelect={selectElement}
-            pointing={pointing}
             hintsVisible={!settings.hintsDismissed && !demo}
-            onDismissHints={() => updateSettings({ hintsDismissed: true })}
             projectName={exportProject.name}
           >
             {pending && (
               <ActionBar
                 version={pending}
                 index={versionIndex}
+                callActive={call.active}
                 onKeep={keep}
                 onUndo={() => undo()}
                 onRefine={() => {
-                  setComposerSeed({ text: 'Refine: ', at: Date.now() });
+                  if (call.active) toast('Tell Ground what you’d like to refine.');
+                  else startCall();
                 }}
                 onShowChanges={() => setPanel('source')}
                 onTour={() => {
@@ -1051,22 +1101,35 @@ export default function App() {
                 }}
               />
             )}
-            <CallDock
-              call={call}
-              controls={callControls}
-              handsFree={settings.handsFree}
-              available={voiceAvailable}
-              healthStatus={health.status}
-              transcribing={transcribing > 0}
-              thinking={busy}
-              speaking={speaking}
-              queued={queued}
-              onInterrupt={() => interrupt()}
-            />
           </PreviewStage>
         </section>
 
-        <Conversation
+        <VoiceRoom
+          call={call}
+          controls={callControls}
+          handsFree={settings.handsFree}
+          queued={queued}
+          turn={turn}
+          transcribing={transcribing > 0}
+          speaking={speaking}
+          speakingMessageId={speakingMessageId}
+          messages={session.messages}
+          pointing={pointing}
+          bridge={bridge}
+          detectedLanguage={detectedLanguage}
+          voiceAvailable={voiceAvailable}
+          health={health}
+          onTranscript={() => setPanel('transcript')}
+          onListen={listen}
+          onRetry={(m) => sendTurn(m.retry.text, { via: m.retry.via })}
+          onInterrupt={() => interrupt()}
+          onClearSelection={() => selectElement(null)}
+          onSelectRef={(id) => selectElement(id, true)}
+          onPointTargets={(targets, tone) => pointAt(targets, tone)}
+        />
+      </main>
+
+      {panel === 'transcript' && <Sheet title="Session transcript" subtitle="A record of your conversation. Keyboard access is here when you need it." onClose={() => setPanel(null)}><div className="transcript-sheet"><Conversation
           messages={session.messages}
           versions={session.versions}
           currentVersionId={session.currentVersionId}
@@ -1103,8 +1166,7 @@ export default function App() {
           busy={busy}
           callActive={call.active}
           session={session}
-        />
-      </main>
+        /></div></Sheet>}
 
       {panel === 'source' && <SourceDrawer session={session} project={exportProject} current={current} onClose={() => setPanel(null)} toast={toast} onRestore={restore} />}
       {panel === 'history' && <HistoryPanel session={session} onClose={() => setPanel(null)} onRestore={restore} onUndo={() => undo()} onShowSource={() => setPanel('source')} onReset={resetProject} project={exportProject} toast={toast} />}

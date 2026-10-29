@@ -7,9 +7,10 @@
   background: var(--paper);
 }
 
+/* The shared page is the hero; the call rail sits beside it like a participant panel in a call. */
 .studio {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 388px;
+  grid-template-columns: minmax(0, 1fr) 360px;
   gap: 12px;
   padding: 0 12px 12px;
   min-height: 0;
@@ -252,35 +253,24 @@
 }
 
 .stage-toolbar {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  height: 44px;
-  padding: 0 8px 0 14px;
+  gap: 10px;
+  height: 46px;
+  padding: 0 8px 0 13px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
 }
 
-.stage-title {
+/* Left side of the toolbar: what "this" means right now. */
+.stage-referent {
+  flex: 1;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   min-width: 0;
-  font-size: 13px;
-}
-
-.stage-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stage-count {
-  color: var(--faint);
-  font-size: 12px;
-  white-space: nowrap;
 }
 
 .live-dot {
@@ -293,25 +283,15 @@
 }
 
 .live-dot.is-live {
-  background: var(--forest);
-  box-shadow: 0 0 0 3px rgba(70, 102, 78, 0.16);
+  background: var(--you);
+  box-shadow: 0 0 0 3px rgba(62, 117, 80, 0.16);
 }
 
 .stage-controls {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.selection-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 38px;
-  padding: 5px 8px 5px 10px;
-  border-bottom: 1px solid var(--line);
-  background: var(--white);
 }
 
 .sel-hint {
@@ -326,47 +306,71 @@
   text-overflow: ellipsis;
 }
 
-.sel-hint b {
-  color: var(--ink-2);
-  font-weight: 600;
+.sel-hint kbd {
+  font-size: 10.5px;
 }
 
+/* Hover = tentative (dashed). Locked = committed (solid). Same language as the outlines on the page. */
+.sel-hover,
 .sel-chip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   height: 28px;
-  padding: 0 3px 0 10px;
-  border-radius: 8px;
-  background: var(--forest-wash);
-  border: 1px solid #cfd9c8;
-  color: var(--forest-deep);
-  font-size: 12.5px;
   min-width: 0;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--you-ink);
+  white-space: nowrap;
+}
+
+.sel-hover {
+  padding: 0 10px 0 8px;
+  border: 1px dashed #a9c8af;
+  background: var(--white);
+}
+
+.sel-chip {
+  padding: 0 3px 0 9px;
+  background: var(--you-wash);
+  border: 1px solid #bcd6bf;
   animation: rise 0.18s var(--ease);
 }
 
+.sel-who {
+  flex: none;
+  font-weight: 700;
+}
+
 .sel-kind {
-  font-weight: 650;
+  flex: none;
+  font-weight: 600;
+  color: var(--ink-2);
 }
 
 .sel-label {
-  color: var(--ink-2);
+  color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
   min-width: 0;
 }
 
+.sel-cue {
+  flex: none;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
 .sel-tools {
+  flex: none;
   display: inline-flex;
   gap: 1px;
-  padding-left: 4px;
-  border-left: 1px solid #cfd9c8;
+  padding-left: 3px;
+  border-left: 1px solid #bcd6bf;
 }
 
 .sel-tools .mini-btn {
-  color: var(--forest-deep);
+  color: var(--you-ink);
   height: 22px;
   min-width: 22px;
 }
@@ -541,95 +545,17 @@
   color: var(--forest);
 }
 
-.pointing-chip {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 11px;
-  border-radius: 999px;
-  background: var(--white);
-  border: 1px solid #dcd7f2;
-  color: var(--lilac-ink);
-  font-size: 12.5px;
-  box-shadow: var(--shadow);
-  animation: rise 0.2s var(--ease);
-  max-width: 60%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  pointer-events: none;
-}
-
-.pointing-chip b {
-  font-weight: 650;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.pointing-count {
-  font-variant-numeric: tabular-nums;
-  color: var(--faint);
-}
-
-.stage-hints {
-  position: absolute;
-  left: 50%;
-  top: 14px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 4px 4px 12px;
-  border-radius: 999px;
-  background: rgba(32, 40, 35, 0.9);
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 12.5px;
-  box-shadow: var(--shadow-lg);
-  white-space: nowrap;
-  animation: rise 0.3s var(--ease) 0.4s both;
-}
-
-.stage-hints > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding-right: 10px;
-  margin-right: 4px;
-  border-right: 1px solid rgba(255, 255, 255, 0.16);
-}
-
-.stage-hints > span:nth-last-of-type(1) {
-  border-right: 0;
-}
-
-.stage-hints kbd {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #fff;
-}
-
-.stage-hints .mini-btn {
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.stage-hints .mini-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-}
-
 /* ================= tour banner ================= */
 
 .tour-banner {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 8px 8px 10px;
+  padding: 7px 8px 7px 10px;
   border-radius: 12px;
   background: var(--white);
-  border: 1px dashed #c9c0ea;
+  border: 1px dashed #cbc1f1;
   box-shadow: var(--shadow-sm);
   animation: rise 0.2s var(--ease);
 }
@@ -668,22 +594,29 @@
 
 /* ================= action bar ================= */
 
+/* A new version waits for a decision: anchored to the top of the shared page, never covering the call. */
 .action-bar {
   position: absolute;
-  top: 92px;
+  top: 58px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 20;
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
   padding: 7px 7px 7px 8px;
   border-radius: 14px;
-  background: var(--white);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-lg);
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid #e6d6ad;
+  box-shadow: 0 0 0 4px rgba(165, 118, 31, 0.07), var(--shadow-lg);
   animation: drop 0.3s var(--ease);
   max-width: calc(100% - 24px);
+  backdrop-filter: blur(6px);
+}
+
+.ab-say {
+  color: var(--forest);
+  font-weight: 550;
 }
 
 @keyframes drop {

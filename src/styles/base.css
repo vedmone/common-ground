@@ -5,8 +5,8 @@
   --white: #ffffff;
   --ink: #202823;
   --ink-2: #3d4640;
-  --muted: #6f766f;
-  --faint: #9aa098;
+  --muted: #697165;
+  --faint: #6e7569;
   --line: #e1ded4;
   --line-2: #d2cec2;
   --forest: #46664e;
@@ -15,9 +15,18 @@
   --forest-wash: #f0f3ec;
   --olive: #7d8660;
   --olive-soft: #e8e9dc;
-  --lilac: #9286d0;
-  --lilac-ink: #5a4fa0;
-  --lilac-wash: #f1effa;
+  /* The two participants. "You" is green, "Ground" is violet — everywhere, including the preview bridge. */
+  --you: #3e7550;
+  --you-ink: #2b5238;
+  --you-soft: #dcebdc;
+  --you-wash: #eef5ee;
+  --ground: #6f5cd3;
+  --ground-ink: #4a3c9e;
+  --ground-soft: #e4dff8;
+  --ground-wash: #f4f2fc;
+  --lilac: var(--ground);
+  --lilac-ink: var(--ground-ink);
+  --lilac-wash: var(--ground-wash);
   --amber: #a5761f;
   --amber-wash: #f7efdc;
   --danger: #a4452f;

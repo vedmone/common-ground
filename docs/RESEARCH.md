@@ -18,7 +18,7 @@ These studies involve human collaboration or embodied agents. Applying the findi
 ## Competitive landscape
 
 - [Google DeepMind AI Pointer](https://deepmind.google/blog/ai-pointer/) explores point-and-speak interaction and natural references such as "this" and "that".
-- [Gemini Live in Chrome](https://support.google.com/gemini/answer/16363185) provides interruptible conversation while sharing browser context, including content highlighting.
+- [Gemini Live in Chrome](https://support.google.com/gemini/answer/16363185) provides interruptible conversation, captions and shared browser context.
 - [Cursor Design Mode](https://prod.cursor.com/docs/agent/design-mode) connects selected interface elements and annotations to agent source edits.
 - [Cua](https://cua.ai/) provides independent human and agent cursors on a shared desktop.
 - [VoiceDOM](https://voicedom.dev/) joins voice feedback to DOM element context for coding-agent handoff.

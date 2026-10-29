@@ -19,7 +19,7 @@ export default function HelpPanel({ onClose, onDemo, onWelcome }) {
             <b>Point.</b> Hover anything in the preview. Click to lock it; use the arrows in the selection bar to widen to the parent or narrow to a child, or <em>Find</em> to pick by name.
           </li>
           <li>
-            <b>Talk or type.</b> Start a voice call (hands-free waits for you to pause; tap mode waits for you) or use the composer. Whatever you were pointing at when you began speaking is captured with your words.
+            <b>Join the voice room.</b> Just talk; Ground waits for you to pause. It detects your language on every turn. Whatever you were pointing at when you began speaking is captured with your words. Keyboard access is available in the session transcript.
           </li>
           <li>
             <b>Ground points back.</b> If “this” could mean several things, Ground moves its cursor to each candidate and asks. Click a suggestion chip to answer.
@@ -35,7 +35,7 @@ export default function HelpPanel({ onClose, onDemo, onWelcome }) {
           <dt>
             <kbd>/</kbd>
           </dt>
-          <dd>Focus the composer</dd>
+          <dd>Open transcript and keyboard access</dd>
           <dt>
             <kbd>Esc</kbd>
           </dt>
@@ -53,7 +53,7 @@ export default function HelpPanel({ onClose, onDemo, onWelcome }) {
       </section>
       <section className="help-section">
         <h3>Privacy</h3>
-        <p className="setup-copy">Sessions and versions are saved only in this browser. Your words, the page source and element references are sent to the configured AI provider when you send a message. The preview runs sandboxed and cannot reach this studio.</p>
+        <p className="setup-copy">Sessions and versions are saved in this browser. Your spoken turns go to Sarvam for transcription and voice; your words, page source and element references go to the configured AI provider. Hosted examples run in an isolated preview. The local companion runs your own trusted project and uses Claude Code for source edits.</p>
       </section>
       <div className="setup-actions">
         <button type="button" className="btn btn-primary btn-sm" onClick={onDemo}>
@@ -63,6 +63,7 @@ export default function HelpPanel({ onClose, onDemo, onWelcome }) {
           <BookOpen size={14} aria-hidden="true" /> Welcome screen
         </button>
       </div>
+      <p className="setup-copy" style={{ marginTop: 18 }}><a href="/research.html" target="_blank" rel="noreferrer">Read the research and product thesis ↗</a></p>
     </Sheet>
   );
 }

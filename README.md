@@ -1,13 +1,15 @@
 # Common Ground
 
-**Point. Talk. Make it real.** A shared review room for you and an AI coworker.
+**Point. Talk. Make it real.** A voice-first shared review room for you and an AI coworker.
+
+Open the live product at **https://common-ground-studio-six.vercel.app**. Join the voice room, point at an element and speak naturally. No language selector is required.
 
 Common Ground binds a conversation to the interface being discussed. Your cursor shows what you mean; Ground's violet cursor shows what it understood. Discuss a direction, see actual code changes in the preview, then keep, refine, or undo them.
 
 ## What works
 
 - Element hover, selection, parent targeting and reciprocal AI pointing.
-- Natural English/Hindi/Hinglish conversations with Sarvam 105B.
+- Automatic speech-language detection on every turn, including English/Hindi/Hinglish; 11 supported Indian language locales.
 - Microphone recording, speech detection, Saaras transcription and Bulbul speech output.
 - Real HTML/CSS generation, live previews, source downloads, version checkpoints and undo.
 - Local session history and export with element references.
@@ -53,7 +55,7 @@ For standalone HTML, omit `--preview`; the companion serves the project's `index
 
 ## Voice
 
-Microphone access needs HTTPS or localhost. You must initiate a call with a click. The room displays whether it is listening, transcribing, thinking or speaking; text input remains available. Audio is sent to Sarvam only for the turn being transcribed. Responses use Bulbul. Closing the call releases the microphone. Screen pixels are not continuously recorded or uploaded; the review bridge sends structured element descriptions and the preview source.
+Microphone access needs HTTPS or localhost. You must initiate a call with a click. The main room is a voice call with live captions and shared visual attention; keyboard access is in the secondary session transcript. Language is detected afresh on each utterance and passed to the conversation and speech models. Saaras supports English, Hindi, Bengali, Gujarati, Kannada, Malayalam, Marathi, Odia, Punjabi, Tamil and Telugu. English and Hinglish have been tested end to end; other locales depend on provider quality and have not been individually evaluated. Audio is sent to Sarvam only for the turn being transcribed. Responses use Bulbul. Closing the call releases the microphone. Screen pixels are not continuously recorded or uploaded; the review bridge sends structured element descriptions and the preview source.
 
 ## Deploy
 

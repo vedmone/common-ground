@@ -1,114 +1,147 @@
 import { useEffect, useRef } from 'react';
-import { Mic, MicOff, PhoneOff, Phone, Volume2, VolumeX, Square, Send, Loader2, Hand, Radio } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Phone, Volume2, VolumeX, Square, Send, Loader2, Keyboard } from 'lucide-react';
 import { cx, clip } from '../lib/util.js';
 
-/** Five bars driven straight from the analyser level: no React render per audio frame. */
-function LevelMeter({ subscribe, active }) {
+/** One honest instruction line for the current microphone / turn state. */
+function statusFor({ call, transcribing, thinking, speaking, handsFree, queued }) {
+  if (call.muted) return { label: 'Your mic is muted', tone: 'muted' };
+  if (call.state === 'hearing') return { label: 'Hearing you…', tone: 'you' };
+  if (call.state === 'recording') return { label: 'Recording · tap Send when done', tone: 'you' };
+  if (transcribing) return { label: 'Catching what you said…', tone: 'wait' };
+  if (thinking) return { label: queued ? 'Ground will take your next point after this' : 'Ground is working on it', tone: 'wait' };
+  if (speaking) return { label: 'Ground is talking · just speak to interrupt', tone: 'ground' };
+  if (!handsFree) return { label: 'Tap Talk, then speak', tone: 'idle' };
+  return { label: 'Just talk · Ground replies when you pause', tone: 'idle' };
+}
+
+/** The mic button carries a live level ring, driven straight from the analyser (no React render per frame). */
+function useLevelRing(subscribe, active) {
   const ref = useRef(null);
   useEffect(() => {
-    if (!active) return;
-    const bars = ref.current ? Array.from(ref.current.children) : [];
+    const el = ref.current;
+    if (!el) return;
+    if (!active) {
+      el.style.setProperty('--level', '0');
+      return;
+    }
     let smoothed = 0;
     return subscribe((level) => {
       smoothed = smoothed * 0.6 + level * 0.4;
-      bars.forEach((bar, i) => {
-        const shape = [0.55, 0.8, 1, 0.8, 0.55][i];
-        const h = Math.max(0.14, Math.min(1, smoothed * 1.8 * shape + 0.08 * Math.random()));
-        bar.style.transform = `scaleY(${h.toFixed(3)})`;
-      });
+      el.style.setProperty('--level', Math.min(1, smoothed * 2.2).toFixed(3));
     });
   }, [subscribe, active]);
+  return ref;
+}
+
+function CtrlButton({ icon: Icon, label, className, iconSize = 18, ...rest }) {
   return (
-    <span className={cx('meter', active && 'is-active')} ref={ref} aria-hidden="true">
-      <i />
-      <i />
-      <i />
-      <i />
-      <i />
-    </span>
+    <button type="button" className={cx('cc-btn', className)} {...rest}>
+      <span className="cc-icon">
+        <Icon size={iconSize} aria-hidden="true" />
+      </span>
+      <span className="cc-text" aria-hidden="true">
+        {label}
+      </span>
+    </button>
   );
 }
 
-function statusFor({ call, transcribing, thinking, speaking, handsFree }) {
-  if (call.connecting) return { label: 'Asking for microphone…', tone: 'wait' };
-  if (call.muted) return { label: 'Microphone muted', tone: 'muted' };
-  if (call.state === 'hearing') return { label: 'Hearing you…', tone: 'you' };
-  if (call.state === 'recording') return { label: 'Recording · tap send when done', tone: 'you' };
-  if (transcribing) return { label: 'Transcribing…', tone: 'wait' };
-  if (thinking) return { label: 'Ground is thinking…', tone: 'wait' };
-  if (speaking) return { label: 'Ground is speaking', tone: 'ground' };
-  if (!handsFree) return { label: 'Tap the mic to talk', tone: 'idle' };
-  return { label: 'Listening · just talk', tone: 'idle' };
-}
-
-export default function CallDock({ call, controls, handsFree, available, healthStatus, transcribing, thinking, speaking, queued, onInterrupt }) {
+export default function CallControls({ call, controls, handsFree, available, healthStatus, transcribing, thinking, speaking, queued, onInterrupt, onTranscript }) {
   const busy = transcribing || thinking || speaking;
+  const micRef = useLevelRing(controls.subscribeLevel, call.active && !call.muted);
 
   if (!call.active) {
-    const reason = !available ? (healthStatus === 'checking' ? 'Checking voice service…' : healthStatus === 'error' ? 'Voice service unreachable' : 'Voice not configured on this server') : call.error;
+    const reason = !available ? (healthStatus === 'checking' ? 'Checking the voice service…' : healthStatus === 'error' ? 'The voice service is unreachable right now.' : 'Voice isn’t configured on this server.') : call.error;
     return (
-      <div className="dock is-idle" role="region" aria-label="Voice call">
-        <button type="button" className="dock-start" onClick={controls.start} disabled={!available || call.connecting} aria-describedby={reason ? 'dock-reason' : undefined}>
-          {call.connecting ? <Loader2 size={16} className="spin" aria-hidden="true" /> : <Phone size={16} aria-hidden="true" />}
-          <span>{call.connecting ? 'Connecting…' : 'Start voice call'}</span>
-        </button>
-        {(thinking || speaking) && (
-          <button type="button" className="dock-btn danger" onClick={onInterrupt} aria-label="Interrupt Ground" title="Interrupt (Esc)">
-            <Square size={14} />
+      <div className="call-controls is-idle" role="region" aria-label="Join the voice call">
+        <div className="cc-join-row">
+          <button type="button" className="cc-join" onClick={controls.start} disabled={!available || call.connecting} aria-describedby="cc-join-note">
+            {call.connecting ? <Loader2 size={18} className="spin" aria-hidden="true" /> : <Phone size={18} aria-hidden="true" />}
+            <span>{call.connecting ? 'Joining…' : 'Join call'}</span>
           </button>
-        )}
-        {reason ? (
-          <span className="dock-reason" id="dock-reason">
-            {clip(reason, 90)}
+          {call.connecting && <button type="button" className="cc-cancel" onClick={controls.end}>Cancel</button>}
+          {(thinking || speaking) && (
+            <button type="button" className="cc-stop-round" onClick={onInterrupt} aria-label="Stop Ground" title="Stop Ground (Esc)">
+              <Square size={14} aria-hidden="true" />
+            </button>
+          )}
+        </div>
+        <div className="cc-join-foot">
+          <span id="cc-join-note" className={cx('cc-note', reason && 'is-problem')} role={reason ? 'status' : undefined}>
+            {call.connecting ? 'Allow the microphone when your browser asks.' : reason ? clip(reason, 110) : 'Your mic opens hands-free. Ground says hello first.'}
           </span>
-        ) : (
-          <span className="dock-reason subtle">Talk while you point. Ground answers out loud.</span>
-        )}
+          <button type="button" className="cc-type" onClick={onTranscript}>
+            <Keyboard size={13} aria-hidden="true" />
+            Type instead
+          </button>
+        </div>
       </div>
     );
   }
 
-  const status = statusFor({ call, transcribing, thinking, speaking, handsFree });
+  const status = statusFor({ call, transcribing, thinking, speaking, handsFree, queued });
   const recording = call.state === 'recording';
   return (
-    <div className={cx('dock is-live', `tone-${status.tone}`)} role="region" aria-label="Voice call controls">
-      <div className="dock-status" aria-live="polite">
-        <LevelMeter subscribe={controls.subscribeLevel} active={!call.muted} />
-        <span className="dock-label">{status.label}</span>
-        {queued && <span className="dock-queued" title={queued}>Next: “{clip(queued, 26)}”</span>}
-      </div>
-      <div className="dock-controls">
-        <div className="seg small" role="radiogroup" aria-label="Turn taking">
+    <div className={cx('call-controls is-live', `tone-${status.tone}`)} role="region" aria-label="Call controls">
+      <div className="cc-status">
+        <span className="cc-status-dot" aria-hidden="true" />
+        <span className="cc-label" aria-live="polite">
+          {status.label}
+        </span>
+        <div className="seg tiny cc-mode" role="radiogroup" aria-label="Turn taking">
           <button type="button" role="radio" aria-checked={handsFree} className={cx(handsFree && 'is-on')} onClick={() => controls.setHandsFree(true)} title="Hands-free: Ground replies when you pause">
-            <Radio size={13} aria-hidden="true" />
-            <span>Hands-free</span>
+            Hands-free
           </button>
-          <button type="button" role="radio" aria-checked={!handsFree} className={cx(!handsFree && 'is-on')} onClick={() => controls.setHandsFree(false)} title="Tap to talk: start and stop yourself">
-            <Hand size={13} aria-hidden="true" />
-            <span>Tap</span>
+          <button type="button" role="radio" aria-checked={!handsFree} className={cx(!handsFree && 'is-on')} onClick={() => controls.setHandsFree(false)} title="Tap to talk: you start and stop each turn">
+            Tap to talk
           </button>
         </div>
+      </div>
+      {queued && (
+        <p className="cc-queued" title={queued}>
+          Up next: “{clip(queued, 48)}”
+        </p>
+      )}
+      <div className="cc-buttons">
+        <button
+          type="button"
+          ref={micRef}
+          className={cx('cc-btn cc-mic', call.muted && 'is-off', call.state === 'hearing' && 'is-hearing')}
+          onClick={controls.toggleMute}
+          aria-pressed={call.muted}
+          aria-label={call.muted ? 'Unmute microphone' : 'Mute microphone'}
+          title={call.muted ? 'Unmute' : 'Mute'}
+        >
+          <span className="cc-icon">{call.muted ? <MicOff size={18} aria-hidden="true" /> : <Mic size={18} aria-hidden="true" />}</span>
+          <span className="cc-text" aria-hidden="true">
+            {call.muted ? 'Unmute' : 'Mute'}
+          </span>
+        </button>
         {handsFree ? (
-          <button type="button" className="dock-btn" onClick={controls.talk} disabled={call.muted || call.state !== 'hearing'} aria-label="Send now (stop listening and send what you said)" title="Send now">
-            <Send size={15} />
-          </button>
+          <CtrlButton icon={Send} iconSize={16} label="Send now" onClick={controls.talk} disabled={call.muted || call.state !== 'hearing'} aria-label="Send now: stop listening and send what you said" title="Send what you said without waiting for a pause" />
         ) : (
-          <button type="button" className={cx('dock-btn talk', recording && 'is-rec')} onClick={controls.talk} disabled={call.muted} aria-label={recording ? 'Stop and send' : 'Start talking'} aria-pressed={recording}>
-            {recording ? <Send size={15} /> : <Mic size={16} />}
-          </button>
+          <CtrlButton
+            icon={recording ? Send : Mic}
+            iconSize={recording ? 16 : 18}
+            label={recording ? 'Send' : 'Talk'}
+            className={cx('cc-talk', recording && 'is-rec')}
+            onClick={controls.talk}
+            disabled={call.muted}
+            aria-pressed={recording}
+            aria-label={recording ? 'Stop recording and send' : 'Start talking'}
+          />
         )}
-        <button type="button" className={cx('dock-btn', call.muted && 'is-warn')} onClick={controls.toggleMute} aria-pressed={call.muted} aria-label={call.muted ? 'Unmute microphone' : 'Mute microphone'} title={call.muted ? 'Unmute' : 'Mute'}>
-          {call.muted ? <MicOff size={16} /> : <Mic size={16} />}
-        </button>
-        <button type="button" className={cx('dock-btn', call.speakerMuted && 'is-warn')} onClick={controls.toggleSpeaker} aria-pressed={call.speakerMuted} aria-label={call.speakerMuted ? 'Turn Ground’s voice on' : 'Turn Ground’s voice off'} title={call.speakerMuted ? 'Voice off' : 'Voice on'}>
-          {call.speakerMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-        </button>
-        <button type="button" className="dock-btn" onClick={onInterrupt} disabled={!busy} aria-label="Interrupt Ground" title="Interrupt (Esc)">
-          <Square size={14} />
-        </button>
-        <button type="button" className="dock-btn end" onClick={controls.end} aria-label="End call" title="End call">
-          <PhoneOff size={16} />
-        </button>
+        <CtrlButton
+          icon={call.speakerMuted ? VolumeX : Volume2}
+          label={call.speakerMuted ? 'Voice off' : 'Voice on'}
+          className={cx(call.speakerMuted && 'is-off')}
+          onClick={controls.toggleSpeaker}
+          aria-pressed={call.speakerMuted}
+          aria-label={call.speakerMuted ? 'Turn Ground’s voice back on' : 'Turn Ground’s voice off (captions only)'}
+          title={call.speakerMuted ? 'Ground’s voice is off — captions only' : 'Ground’s voice is on'}
+        />
+        <CtrlButton icon={Square} iconSize={14} label="Stop" className="cc-stop" onClick={onInterrupt} disabled={!busy} aria-label="Stop Ground" title="Stop Ground (Esc)" />
+        <CtrlButton icon={PhoneOff} label="Leave" className="cc-end" onClick={controls.end} aria-label="Leave the call" title="Leave the call" />
       </div>
     </div>
   );

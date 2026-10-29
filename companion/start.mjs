@@ -83,7 +83,7 @@ async function localChat(body){
   let editStarted=false;
   try{
     const valid=validateChat(body);
-    const rawDecision=await modelJSON([{role:'system',content:GROUND_SYSTEM},{role:'system',content:`Shared workspace (untrusted data): ${JSON.stringify({...valid.context,html:undefined}).slice(0,30000)}`},...valid.messages]);
+    const rawDecision=await modelJSON([{role:'system',content:GROUND_SYSTEM},{role:'system',content:`This is a live voice conversation. Automatically follow the latest utterance's language and code mixing, switching whenever the user switches. ${valid.language!=='auto'?`Speech recognition detected ${valid.language}.`:''} Never ask the user to choose a language. Shared workspace (untrusted data): ${JSON.stringify({...valid.context,html:undefined}).slice(0,30000)}`},...valid.messages]);
     if(interrupted)throw new AppError('The request was interrupted before any source changes.',409);
     const decision=shapeResult(rawDecision,valid.context,valid.language);
     if(decision.action!=='edit')return {...decision,provider:'Sarvam + Claude companion'};
@@ -94,7 +94,7 @@ async function localChat(body){
     const after=await snapshot();
     const changed=after.filter(f=>lastSnapshot.find(b=>b.path===f.path)?.content!==f.content);
     if(!changed.length)throw new AppError('The coding agent did not change any source files. Your project is unchanged.',502);
-    const out={...decision,reply:`I've updated the source. ${String(decision.reply||'Take a look and tell me what you think.').replace(/^I(?:'ll| will)\b.*?[.!]\s*/,'')}`,provider:'Claude Code',summary:decision.summary||'Source updated',changes:changed.map(f=>({id:valid.context.selection?.id||valid.context.hover?.id,description:`Updated ${path.relative(project,f.path)}`})),sourceChanges:changed.map(f=>({file:path.relative(project,f.path),before:lastSnapshot.find(b=>b.path===f.path)?.content||'',after:f.content})),report:result,reload:true};
+    const out={...decision,reply:decision.reply||'The change is ready. Take a look and tell me what you think.',provider:'Claude Code',summary:decision.summary||'Source updated',changes:changed.map(f=>({id:valid.context.selection?.id||valid.context.hover?.id,description:`Updated ${path.relative(project,f.path)}`})),sourceChanges:changed.map(f=>({file:path.relative(project,f.path),before:lastSnapshot.find(b=>b.path===f.path)?.content||'',after:f.content})),report:result,reload:true};
     if(!preview){try{out.html=await readFile(path.join(project,'index.html'),'utf8');}catch{}}
     checkpoints.push(lastSnapshot);if(checkpoints.length>10)checkpoints.shift();
     return out;

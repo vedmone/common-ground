@@ -189,7 +189,7 @@
     '.hover{outline:1.5px solid rgba(70,102,78,.85);outline-offset:1px;background:rgba(70,102,78,.06)}',
     '.hover.sim{outline-style:dashed}',
     '.sel{outline:2px solid #46664e;outline-offset:2px;background:rgba(70,102,78,.08);box-shadow:0 0 0 6px rgba(70,102,78,.10)}',
-    '.ai{outline:2px solid #9286d0;outline-offset:3px;background:rgba(146,134,208,.12);box-shadow:0 0 0 7px rgba(146,134,208,.16)}',
+    '.ai{outline:2px solid #6f5cd3;outline-offset:3px;background:rgba(111,92,211,.10);box-shadow:0 0 0 7px rgba(111,92,211,.14)}',
     '.ai.clarify{outline-style:dashed}',
     '.ai.change{animation:pulse 1.6s ease-out 2}',
     '@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(146,134,208,.45)}100%{box-shadow:0 0 0 14px rgba(146,134,208,0)}}',
@@ -202,7 +202,7 @@
     '.cursor.on{opacity:1}',
     '.cursor.dim{opacity:.55}',
     '.cursor svg{display:block;filter:drop-shadow(0 2px 3px rgba(32,40,35,.28))}',
-    '.pill{position:absolute;left:18px;top:20px;white-space:nowrap;max-width:300px;overflow:hidden;text-overflow:ellipsis;background:#9286d0;color:#fff;padding:5px 9px;border-radius:999px 999px 999px 4px;font-weight:600;box-shadow:0 4px 14px -4px rgba(60,48,120,.45)}',
+    '.pill{position:absolute;left:18px;top:20px;white-space:nowrap;max-width:300px;overflow:hidden;text-overflow:ellipsis;background:#6f5cd3;color:#fff;padding:5px 9px;border-radius:999px 999px 999px 4px;font-weight:600;box-shadow:0 4px 14px -4px rgba(60,48,120,.45)}',
     '.pill b{font-weight:700;margin-right:4px}',
     '@media (prefers-reduced-motion: reduce){.cursor{transition:opacity .2s ease}.ai.change{animation:none}}'
   ].join('\n');
@@ -216,7 +216,7 @@
       '<div class="box hover"><span class="tag"></span></div>' +
       '<div class="box sel"><span class="tag"></span></div>' +
       '<div class="box ai"><span class="tag"></span></div>' +
-      '<div class="cursor"><svg width="22" height="24" viewBox="0 0 22 24" fill="none"><path d="M2 1.8 19 10.6l-7.4 1.9-3.5 7.2L2 1.8Z" fill="#9286d0" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg><span class="pill"></span></div>' +
+      '<div class="cursor"><svg width="22" height="24" viewBox="0 0 22 24" fill="none"><path d="M2 1.8 19 10.6l-7.4 1.9-3.5 7.2L2 1.8Z" fill="#6f5cd3" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg><span class="pill"></span></div>' +
       '</div>';
     boxes.hover = shadow.querySelector('.hover');
     boxes.sel = shadow.querySelector('.sel');

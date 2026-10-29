@@ -350,14 +350,7 @@ function Composer({ onSend, onInterrupt, busy, chatAvailable, bridge, onClearSel
             Edit
           </button>
         </div>
-        <div className="seg tiny" role="radiogroup" aria-label="Language">
-          <button type="button" role="radio" aria-checked={settings.language === 'en-IN'} className={cx(settings.language === 'en-IN' && 'is-on')} onClick={() => updateSettings({ language: 'en-IN' })}>
-            English
-          </button>
-          <button type="button" role="radio" aria-checked={settings.language === 'hi-IN'} className={cx(settings.language === 'hi-IN' && 'is-on')} onClick={() => updateSettings({ language: 'hi-IN' })}>
-            हिंदी / Hinglish
-          </button>
-        </div>
+        <span className="auto-language-note">Language detected automatically</span>
         <label className="toggle-inline" title="Read replies aloud when you are not on a call">
           <input type="checkbox" checked={settings.readAloud} onChange={(e) => updateSettings({ readAloud: e.target.checked })} />
           <span>Read aloud</span>

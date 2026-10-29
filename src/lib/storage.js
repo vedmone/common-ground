@@ -8,7 +8,7 @@ const MAX_HTML = 400_000;
 export const DEFAULT_SETTINGS = {
   welcomeSeen: false,
   projectId: 'saltmarsh',
-  language: 'en-IN',
+  language: 'auto',
   readAloud: false,
   handsFree: true,
   mode: 'discuss',
@@ -44,7 +44,7 @@ export function loadSettings() {
   if (!raw || typeof raw !== 'object') return s;
   for (const key of ['welcomeSeen', 'readAloud', 'handsFree', 'hintsDismissed']) if (typeof raw[key] === 'boolean') s[key] = raw[key];
   if (str(raw.projectId, 60)) s.projectId = raw.projectId;
-  if (raw.language === 'hi-IN' || raw.language === 'en-IN') s.language = raw.language;
+  s.language = 'auto';
   if (raw.mode === 'edit' || raw.mode === 'discuss') s.mode = raw.mode;
   if (str(raw.companionUrl, 300) && /^https?:\/\//.test(raw.companionUrl)) s.companionUrl = raw.companionUrl;
   if (str(raw.companionToken, 300)) s.companionToken = raw.companionToken;
@@ -123,6 +123,7 @@ function cleanMessage(m) {
     targets: cleanTargets(m.targets),
     versionId: str(m.versionId, 120) ? m.versionId : null,
     provider: str(m.provider, 80) ? m.provider : '',
+    language: /^(en|hi|bn|gu|kn|ml|mr|od|pa|ta|te)-IN$/.test(m.language || '') ? m.language : 'auto',
     scripted: !!m.scripted,
     local: !!m.local,
     error: str(m.error, 600) ? m.error : '',

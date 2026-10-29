@@ -74,50 +74,62 @@ function ElementFinder({ store, onSelect, onClose }) {
   );
 }
 
-function SelectionBar({ bridge, store, onSelect }) {
-  const [finder, setFinder] = useState(false);
+/** What "this" currently means: the locked selection, else the live hover, else how to point. */
+function Referent({ bridge, onSelect, reviewMode, hintsVisible }) {
   const sel = bridge.selection;
   const hover = bridge.hover;
-  return (
-    <div className="selection-bar">
-      {sel ? (
-        <div className="sel-chip" role="status">
-          <Lock size={12} aria-hidden="true" />
-          <span className="sel-kind">{sel.kind || sel.tag}</span>
-          <span className="sel-label">{clip(sel.label || sel.text || sel.id, 38)}</span>
-          <span className="sel-tools">
-            <button type="button" className="mini-btn" disabled={!sel.parentId} onClick={() => onSelect(sel.parentId)} title="Select parent element" aria-label="Select parent element">
-              <ArrowUpToLine size={13} />
-            </button>
-            <button type="button" className="mini-btn" disabled={!sel.childId} onClick={() => onSelect(sel.childId)} title="Select first child element" aria-label="Select first child element">
-              <ArrowDownToLine size={13} />
-            </button>
-            <button type="button" className="mini-btn" onClick={() => onSelect(null)} title="Clear selection (Esc)" aria-label="Clear selection">
-              <X size={13} />
-            </button>
-          </span>
-        </div>
-      ) : (
-        <div className="sel-hint" aria-live="off">
-          {hover ? (
-            <>
-              <CursorGlyph who="you" size={11} />
-              <span>
-                Pointing at <b>{hover.kind}</b> {clip(hover.label, 30)}
-              </span>
-            </>
-          ) : (
-            <span>Hover to point · click to lock a selection</span>
-          )}
-        </div>
-      )}
-      <div className="finder-wrap">
-        <button type="button" className={cx('mini-btn labeled', finder && 'is-on')} onClick={() => setFinder((f) => !f)} disabled={!bridge.ready} aria-expanded={finder}>
-          <Search size={13} aria-hidden="true" />
-          <span>Find</span>
-        </button>
-        {finder && <ElementFinder store={store} onSelect={(id) => onSelect(id, true)} onClose={() => setFinder(false)} />}
+  if (sel) {
+    return (
+      <div className="sel-chip" role="status">
+        <Lock size={12} aria-hidden="true" />
+        <span className="sel-who">You · locked</span>
+        <span className="sel-kind">{sel.kind || sel.tag}</span>
+        <span className="sel-label">{clip(sel.label || sel.text || sel.id, 40)}</span>
+        <span className="sel-tools">
+          <button type="button" className="mini-btn" disabled={!sel.parentId} onClick={() => onSelect(sel.parentId)} title="Widen to the parent element" aria-label="Select parent element">
+            <ArrowUpToLine size={13} />
+          </button>
+          <button type="button" className="mini-btn" disabled={!sel.childId} onClick={() => onSelect(sel.childId)} title="Narrow to the first child element" aria-label="Select first child element">
+            <ArrowDownToLine size={13} />
+          </button>
+          <button type="button" className="mini-btn" onClick={() => onSelect(null)} title="Clear selection (Esc)" aria-label="Clear selection">
+            <X size={13} />
+          </button>
+        </span>
       </div>
+    );
+  }
+  if (hover && reviewMode) {
+    return (
+      <div className="sel-hover" aria-live="off">
+        <CursorGlyph who="you" size={11} />
+        <span className="sel-who">You</span>
+        <span className="sel-kind">{hover.kind || hover.tag}</span>
+        <span className="sel-label">{clip(hover.label || hover.text, 40)}</span>
+        <span className="sel-cue">click to lock</span>
+      </div>
+    );
+  }
+  if (!reviewMode) return <div className="sel-hint">Interact mode · the page behaves normally. Switch to Review to point.</div>;
+  return (
+    <div className="sel-hint">
+      <CursorGlyph who="you" size={11} />
+      <span>
+        Hover to point · click to lock{hintsVisible ? <> · <kbd>Esc</kbd> clears</> : null}
+      </span>
+    </div>
+  );
+}
+
+function Finder({ bridge, store, onSelect }) {
+  const [finder, setFinder] = useState(false);
+  return (
+    <div className="finder-wrap">
+      <button type="button" className={cx('mini-btn labeled', finder && 'is-on')} onClick={() => setFinder((f) => !f)} disabled={!bridge.ready} aria-expanded={finder} title="Find an element by name" aria-label="Find an element">
+        <Search size={13} aria-hidden="true" />
+        <span className="hide-xs">Find</span>
+      </button>
+      {finder && <ElementFinder store={store} onSelect={(id) => onSelect(id, true)} onClose={() => setFinder(false)} />}
     </div>
   );
 }
@@ -136,9 +148,7 @@ export default function PreviewStage({
   reviewMode,
   onReviewMode,
   onSelect,
-  pointing,
   hintsVisible,
-  onDismissHints,
   projectName,
   children,
 }) {
@@ -156,23 +166,23 @@ export default function PreviewStage({
   return (
     <div className="stage">
       <div className="stage-toolbar">
-        <div className="stage-title">
+        <div className="stage-referent" title={bridge.ready ? `${bridge.title || projectName} · ${bridge.count} elements mapped` : undefined}>
           <span className={cx('live-dot', bridge.ready && 'is-live')} aria-hidden="true" />
-          <span className="stage-name">{bridge.title || projectName}</span>
-          {bridge.ready && <span className="stage-count">{bridge.count} elements mapped</span>}
+          <Referent bridge={bridge} onSelect={onSelect} reviewMode={reviewMode} hintsVisible={hintsVisible} />
         </div>
         <div className="stage-controls">
+          <Finder bridge={bridge} store={store} onSelect={onSelect} />
           <div className="seg" role="radiogroup" aria-label="Pointer mode">
-            <button type="button" role="radio" aria-checked={reviewMode} className={cx(reviewMode && 'is-on')} onClick={() => onReviewMode(true)} title="Review: clicks select elements">
+            <button type="button" role="radio" aria-checked={reviewMode} className={cx(reviewMode && 'is-on')} onClick={() => onReviewMode(true)} title="Review: hover points, click locks an element" aria-label="Review">
               <MousePointer2 size={13} aria-hidden="true" />
-              <span>Review</span>
+              <span className="seg-text">Review</span>
             </button>
-            <button type="button" role="radio" aria-checked={!reviewMode} className={cx(!reviewMode && 'is-on')} onClick={() => onReviewMode(false)} title="Interact: use the page normally">
+            <button type="button" role="radio" aria-checked={!reviewMode} className={cx(!reviewMode && 'is-on')} onClick={() => onReviewMode(false)} title="Interact: use the page normally" aria-label="Interact">
               <Hand size={13} aria-hidden="true" />
-              <span>Interact</span>
+              <span className="seg-text">Interact</span>
             </button>
           </div>
-          <div className="seg icons" role="radiogroup" aria-label="Viewport width">
+          <div className="seg icons stage-viewports" role="radiogroup" aria-label="Viewport width">
             {VIEWPORTS.map((v) => (
               <button type="button" role="radio" aria-checked={viewport === v.id} key={v.id} className={cx(viewport === v.id && 'is-on')} onClick={() => setViewport(v.id)} title={v.label} aria-label={v.label}>
                 <v.icon size={14} />
@@ -184,8 +194,6 @@ export default function PreviewStage({
           </button>
         </div>
       </div>
-
-      <SelectionBar bridge={bridge} store={store} onSelect={onSelect} />
 
       <div className={cx('stage-canvas', vp.width && 'is-framed')}>
         <div className="frame-shell" style={vp.width ? { width: vp.width } : undefined}>
@@ -202,35 +210,7 @@ export default function PreviewStage({
               <span>{slow ? (isCompanion ? 'Still waiting for the preview bridge. Is your dev server running?' : 'Still loading the preview…') : 'Mapping the page…'}</span>
             </div>
           )}
-          {pointing?.target && (
-            <div className="pointing-chip" aria-hidden="true">
-              <CursorGlyph who="ground" size={11} />
-              Ground {pointing.tone === 'clarify' ? 'is checking' : pointing.tone === 'change' ? 'changed' : 'is pointing at'} <b>{clip(pointing.target.label, 34)}</b>
-              {pointing.total > 1 && (
-                <span className="pointing-count">
-                  {pointing.index + 1}/{pointing.total}
-                </span>
-              )}
-            </div>
-          )}
         </div>
-        {hintsVisible && showFrame && bridge.ready && (
-          <div className="stage-hints" role="note">
-            <span>
-              <CursorGlyph who="you" size={12} /> Hover to point
-            </span>
-            <span>Click to lock</span>
-            <span>
-              <kbd>Esc</kbd> to clear
-            </span>
-            <span>
-              <kbd>/</kbd> to type
-            </span>
-            <button type="button" className="mini-btn" onClick={onDismissHints} aria-label="Dismiss hints">
-              <X size={12} />
-            </button>
-          </div>
-        )}
       </div>
       {children}
     </div>

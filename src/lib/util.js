@@ -69,3 +69,20 @@ export function fileSlug(s) {
 
 export const UNDO_RE = /^\s*(undo|undo (that|it|this|the last (change|edit))|revert( that| it)?|go back|take (that|it) back|wapas( karo| kar do)?|pehle jaisa( karo| kar do)?|पहले जैसा.*|वापस.*)[\s.!]*$/i;
 export const STOP_RE = /^\s*(stop|cancel|wait|hold on|never ?mind|ruko|ruk jao|bas|रुको|बस)[\s.!]*$/i;
+export const KEEP_RE = /^\s*(keep( (it|this|that|this version))?|looks good|perfect|done|this works|keep the change|haan( ye| yahi)?( theek hai)?|yeh? (theek|sahi) hai|रखो|ठीक है)[\s.!]*$/i;
+
+export function commandReply(command, language) {
+  const replies = {
+    'hi-IN': ['Haan, yahi rakhte hain. Aur kya dekhein?', 'Wapas kar diya. Ab dekhiye.'],
+    'bn-IN': ['এটাই রাখলাম। এবার আর কী দেখব?', 'আগের অবস্থায় ফিরিয়ে দিয়েছি। দেখুন।'],
+    'gu-IN': ['આ જ રાખ્યું. હવે બીજું શું જોઈએ?', 'પહેલાં જેવું કરી દીધું. હવે જુઓ.'],
+    'kn-IN': ['ಇದನ್ನೇ ಉಳಿಸಿದ್ದೇನೆ. ಮುಂದೆ ಏನು ನೋಡೋಣ?', 'ಹಿಂದಿನ ಸ್ಥಿತಿಗೆ ತಂದಿದ್ದೇನೆ. ಈಗ ನೋಡಿ.'],
+    'ml-IN': ['ഇത് സൂക്ഷിച്ചു. ഇനി എന്താണ് നോക്കേണ്ടത്?', 'പഴയ രൂപത്തിലാക്കി. ഇപ്പോൾ നോക്കൂ.'],
+    'mr-IN': ['हेच ठेवले. आता आणखी काय पाहूया?', 'आधीसारखे केले. आता बघा.'],
+    'od-IN': ['ଏହାକୁ ରଖିଲି। ଆଉ କଣ ଦେଖିବା?', 'ପୂର୍ବ ଅବସ୍ଥାକୁ ଫେରାଇଲି। ଏବେ ଦେଖନ୍ତୁ।'],
+    'pa-IN': ['ਇਹੀ ਰੱਖ ਲਿਆ। ਹੁਣ ਹੋਰ ਕੀ ਦੇਖੀਏ?', 'ਪਹਿਲਾਂ ਵਰਗਾ ਕਰ ਦਿੱਤਾ। ਹੁਣ ਦੇਖੋ।'],
+    'ta-IN': ['இதையே வைத்துக்கொண்டேன். அடுத்து எதைப் பார்க்கலாம்?', 'பழைய நிலைக்கு மாற்றிவிட்டேன். இப்போது பாருங்கள்.'],
+    'te-IN': ['ఇదే ఉంచాను. తర్వాత ఏం చూద్దాం?', 'మునుపటిలా మార్చాను. ఇప్పుడు చూడండి.'],
+  };
+  return (replies[language] || ['Kept it. What shall we look at next?', 'Undone. Have a look.'])[command === 'undo' ? 1 : 0];
+}

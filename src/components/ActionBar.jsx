@@ -1,32 +1,36 @@
 import { Check, Undo2, PenLine, GitCompareArrows, Navigation } from 'lucide-react';
 import { clip } from '../lib/util.js';
 
-export default function ActionBar({ version, index, onKeep, onUndo, onRefine, onShowChanges, onTour }) {
+export default function ActionBar({ version, index, callActive, onKeep, onUndo, onRefine, onShowChanges, onTour }) {
   const count = version.changes?.length || version.sourceChanges?.length || 0;
+  const where = version.origin === 'companion' ? 'Applied to your local files' : version.origin === 'demo' ? 'Scripted demo edit' : 'Live on the page';
   return (
     <div className="action-bar" role="region" aria-label={`Review version ${index}`}>
       <div className="ab-info">
-        <span className="ab-badge">v{index}</span>
+        <span className="ab-badge" aria-hidden="true">
+          v{index}
+        </span>
         <div className="ab-text">
-          <b>{clip(version.summary, 54)}</b>
+          <b title={version.summary}>{clip(version.summary, 60)}</b>
           <small>
-            {version.origin === 'companion' ? 'Applied to your local files' : version.origin === 'demo' ? 'Scripted demo edit' : 'Live in the preview'}
+            {where}
             {count ? ` · ${count} change${count > 1 ? 's' : ''}` : ''}
+            {callActive && <span className="ab-say"> · say “keep it” or “undo”</span>}
           </small>
         </div>
       </div>
       <div className="ab-actions">
         {version.changes?.length > 0 && (
-          <button type="button" className="btn btn-quiet btn-sm" onClick={onTour} title="Ground points at what changed">
+          <button type="button" className="btn btn-quiet btn-sm ab-secondary" onClick={onTour} title="Ground points at each change again">
             <Navigation size={14} aria-hidden="true" />
-            <span className="hide-sm">Walk me through</span>
+            <span className="hide-sm">Show me</span>
           </button>
         )}
-        <button type="button" className="btn btn-quiet btn-sm" onClick={onShowChanges}>
+        <button type="button" className="btn btn-quiet btn-sm ab-secondary" onClick={onShowChanges} title="See the exact before/after source">
           <GitCompareArrows size={14} aria-hidden="true" />
-          <span className="hide-sm">Changes</span>
+          <span className="hide-sm">Diff</span>
         </button>
-        <button type="button" className="btn btn-quiet btn-sm" onClick={onRefine}>
+        <button type="button" className="btn btn-quiet btn-sm" onClick={onRefine} title={callActive ? 'Tell Ground what to adjust' : 'Join the call and tell Ground what to adjust'}>
           <PenLine size={14} aria-hidden="true" />
           <span>Refine</span>
         </button>
