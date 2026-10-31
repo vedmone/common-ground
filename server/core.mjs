@@ -537,9 +537,9 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
         ...decisionMessages,
         { role: 'assistant', content: JSON.stringify(result) },
         {
-          role: 'user',
+          role: 'system',
           content:
-            'Correct the response schema for the original request. Return VALID JSON with action:"compare" and EXACTLY TWO directions. Each direction is an object with name, intent, patches (an array), and changes (an array). Keep both directions within the requested scope, preserve the original requested colors/content, and start both from the same original page. Include the normal reply, targets, intent, summary and changes fields too. Do not omit directions or put them in patches.',
+            'Keep the spoken reply in the original user request’s language. Correct the response schema for the original request. Return VALID JSON with action:"compare" and EXACTLY TWO directions. Each direction is an object with name, intent, patches (an array), and changes (an array). Keep both directions within the requested scope, preserve the original requested colors/content, and start both from the same original page. Include the normal reply, targets, intent, summary and changes fields too. Do not omit directions or put them in patches.',
         },
       ],
       { signal, maxTokens: 1800 },
