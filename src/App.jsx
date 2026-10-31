@@ -1809,12 +1809,18 @@ export default function App() {
                 !turnRef.current?.speechInterrupted;
               if (metric) metric.replyReadyAt = Date.now();
               if (read && !earlyReply) {
-                earlyReply = event.reply;
+                const speechStyle = live.current.voiceProfile.style;
+                earlyReply =
+                  speechStyle === language
+                    ? event.reply
+                    : spokenUI('progress', speechStyle) || event.reply;
                 if (metric) metric.ttsRequestedAt = Date.now();
-                speakText(event.reply, {
-                  language,
+                speakText(earlyReply, {
+                  language: speechStyle,
                   afterQuestions: true,
-                  isCurrent: () => work.state !== 'cancelled',
+                  isCurrent: () =>
+                    work.state !== 'cancelled' &&
+                    live.current.voiceProfile.style === speechStyle,
                   onStart: (duration) => {
                     if (metric && !metric.firstAudioAt) {
                       metric.firstAudioAt = Date.now();
@@ -1878,12 +1884,21 @@ export default function App() {
                   tone: 'point',
                   expectAudio: read,
                 });
-              if (read && !earlyReply)
-                speakText(event.reply, {
-                  language,
-                  isCurrent: () => work.state !== 'cancelled',
+              if (read && !earlyReply) {
+                const speechStyle = live.current.voiceProfile.style;
+                const spoken =
+                  speechStyle === language
+                    ? event.reply
+                    : spokenUI('progress', speechStyle) || event.reply;
+                speakText(spoken, {
+                  language: speechStyle,
+                  afterQuestions: true,
+                  isCurrent: () =>
+                    work.state !== 'cancelled' &&
+                    live.current.voiceProfile.style === speechStyle,
                   onStart: (d) => tour.syncToAudio(d),
                 });
+              }
             }
           });
         }
@@ -1896,7 +1911,7 @@ export default function App() {
           id,
           projectAtStart,
           parent: curVersion,
-          language,
+          language: live.current.voiceProfile.style,
           earlyReply,
           taskId: executingTask?.id,
           beforeElements,

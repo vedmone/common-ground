@@ -658,6 +658,12 @@ test(
       );
       assert.ok(source().includes('Made slowly, by hand.'));
       assert.ok(!ui.queryByRole('status', { name: 'Waiting for details' }));
+      await waitFor(() =>
+        assert.ok(
+          speech.some((text) => text.includes('Task 1 ready है.')),
+          'completion follows the current Hindi-English mix instead of the original English brief',
+        ),
+      );
       await say('Give this button two directions.', false);
       await waitFor(() =>
         assert.ok(
