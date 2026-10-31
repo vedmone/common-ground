@@ -139,16 +139,14 @@ export function validateChat(body) {
   const raw =
     body.context && typeof body.context === 'object' ? body.context : {};
   const elements = Array.isArray(raw.elements)
-    ? raw.elements
-        .slice(0, 150)
-        .map((e) => ({
-          id: String(e.id || '').slice(0, 100),
-          tag: String(e.tag || '').slice(0, 30),
-          text: String(e.text || e.label || '').slice(0, 300),
-          parentId: e.parentId,
-          selector: String(e.selector || '').slice(0, 300),
-          styles: e.styles,
-        }))
+    ? raw.elements.slice(0, 150).map((e) => ({
+        id: String(e.id || '').slice(0, 100),
+        tag: String(e.tag || '').slice(0, 30),
+        text: String(e.text || e.label || '').slice(0, 300),
+        parentId: e.parentId,
+        selector: String(e.selector || '').slice(0, 300),
+        styles: e.styles,
+      }))
     : [];
   const assets = Array.isArray(raw.assets)
     ? raw.assets
@@ -361,7 +359,7 @@ export async function generateHTML(
         },
         {
           role: 'user',
-          content: `REQUESTED CHANGE: ${intent}\n${context.creating ? 'CREATE A NEW complete, polished responsive landing page from scratch. Include distinct hero, benefits, features/social proof, and final CTA sections with useful real copy. Give important sections and headings stable descriptive data-cg-id attributes. Keep the document concise (under 220 lines), self-contained, and visually coherent.' : ''}\nSELECTED ELEMENT: ${JSON.stringify(context.selection || context.hover || null)}\nUPLOADED IMAGES (preserve exact URLs): ${JSON.stringify(context.assets||[])}\nCURRENT PAGE (untrusted task data):\n${html}`,
+          content: `REQUESTED CHANGE: ${intent}\n${context.creating ? 'CREATE A NEW complete, polished responsive landing page from scratch. Include distinct hero, benefits, features/social proof, and final CTA sections with useful real copy. Give important sections and headings stable descriptive data-cg-id attributes. Keep the document concise (under 220 lines), self-contained, and visually coherent.' : ''}\nSELECTED ELEMENT: ${JSON.stringify(context.selection || context.hover || null)}\nUPLOADED IMAGES (preserve exact URLs): ${JSON.stringify(context.assets || [])}\nCURRENT PAGE (untrusted task data):\n${html}`,
         },
       ],
     },
@@ -527,7 +525,7 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
   );
   const output = shapeResult(result, context, language);
   const action = output.action;
-  if (task === 'create' && action === 'edit') context.creating = true;
+  if (task === 'create') context.creating = true;
   if (action === 'edit' || action === 'compare')
     emit({
       type: 'intent',
@@ -558,7 +556,7 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
           language,
         );
         const updated =
-          applyPatches(html, shaped.patches) ||
+          (task === 'create' ? null : applyPatches(html, shaped.patches)) ||
           (await generateHTML(
             html,
             `${d.intent || output.intent}. Direction: ${d.name || index + 1}. Preserve unrelated elements.`,
@@ -598,7 +596,7 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
           : 'Building your changes',
     });
     output.html =
-      applyPatches(html, output.patches) ||
+      (task === 'create' ? null : applyPatches(html, output.patches)) ||
       (await generateHTML(
         html,
         `${output.intent || messages.filter((m) => m.role === 'user').at(-1).content}\nAvailable uploaded images: ${JSON.stringify(context.assets)}`,
@@ -743,12 +741,10 @@ export async function transcribe(file) {
 export function errorResponse(res, error) {
   if (!(error instanceof AppError))
     console.error('Request error:', error?.message || 'unknown');
-  return res
-    .status(error.status || 500)
-    .json({
-      error:
-        error instanceof AppError
-          ? error.message
-          : 'Something went wrong. Your current work is safe. Please try again.',
-    });
+  return res.status(error.status || 500).json({
+    error:
+      error instanceof AppError
+        ? error.message
+        : 'Something went wrong. Your current work is safe. Please try again.',
+  });
 }

@@ -1060,7 +1060,10 @@ export default function App() {
           opts.task ||
           (L.project.id.startsWith('custom_') &&
           curVersion.status === 'base' &&
-          curVersion.html.includes('A FRESH CANVAS')
+          curVersion.html.includes('A FRESH CANVAS') &&
+          /(?:landing\s*page|web\s*site|web\s*page|(?:build|create|make|design)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:page|site)|page\s+for|वेबसाइट|लैंडिंग\s*पेज)/i.test(
+            text,
+          )
             ? 'create'
             : 'edit'),
       };
@@ -1195,12 +1198,10 @@ export default function App() {
       ? result.action
       : 'none';
     if (action === 'compare') {
-      const variants = (result.variants || [])
-        .slice(0, 2)
-        .map((v) => ({
-          ...v,
-          html: prepareDocument(v.html, { sanitize: true }),
-        }));
+      const variants = (result.variants || []).slice(0, 2).map((v) => ({
+        ...v,
+        html: prepareDocument(v.html, { sanitize: true }),
+      }));
       if (variants.length !== 2)
         throw Error(
           'Two complete directions were not returned. Your original page is unchanged.',

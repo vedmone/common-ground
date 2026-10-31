@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readCompletion, partialReply, serveChat } from '../server/stream.mjs';
 import { EventEmitter } from 'node:events';
 import { readNDJSON } from '../src/lib/api.js';
-import { applyPatches, validateChat } from '../server/core.mjs';
+import { applyPatches, validateChat, chat } from '../server/core.mjs';
 import {
   pageTour,
   changedTargets,
@@ -222,4 +222,51 @@ test('closing the client stream aborts in-flight generation without a success ev
   await pending;
   assert.ok(aborted);
   assert.ok(!events.some((e) => e.type === 'result' || e.type === 'error'));
+});
+
+test('create-from-scratch always generates a full page even if intent includes small patches', async () => {
+  const originalFetch = globalThis.fetch,
+    originalKey = process.env.SARVAM_API_KEY;
+  let calls = 0;
+  process.env.SARVAM_API_KEY = 'test-key';
+  const complete =
+    '<!doctype html><html><head><title>New studio</title></head><body><h1>A complete new page</h1><section><h2>Workshops</h2><p>Made by hand with real clay.</p></section><section><h2>Visit us</h2><p>Join the next workshop in Jaipur.</p></section></body></html>';
+  globalThis.fetch = async () => {
+    calls++;
+    return Response.json({
+      choices: [
+        {
+          message: {
+            content:
+              calls === 1
+                ? JSON.stringify({
+                    action: 'edit',
+                    reply: 'I am creating your page.',
+                    intent: 'Create a studio landing page',
+                    patches: [{ id: 'hero-heading', text: 'Changed title' }],
+                  })
+                : complete,
+          },
+          finish_reason: 'stop',
+        },
+      ],
+    });
+  };
+  try {
+    const output = await chat({
+      task: 'create',
+      messages: [{ role: 'user', content: 'Build a studio landing page.' }],
+      context: {
+        html: blankHTML(),
+        elements: [{ id: 'hero-heading', tag: 'h1', text: 'Untitled page' }],
+      },
+    });
+    assert.equal(calls, 2);
+    assert.ok(output.html.includes('A complete new page'));
+    assert.ok(!output.html.includes('A FRESH CANVAS'));
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.SARVAM_API_KEY;
+    else process.env.SARVAM_API_KEY = originalKey;
+  }
 });
