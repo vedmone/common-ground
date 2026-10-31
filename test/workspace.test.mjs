@@ -282,14 +282,14 @@ test('create-from-scratch always generates a full page even if intent includes s
   }
 });
 
-test('comparison repairs a missing pair once and builds both options from the original', async () => {
+test('comparison plans missing alternatives independently from the same original', async () => {
   const originalFetch = globalThis.fetch,
     originalKey = process.env.SARVAM_API_KEY;
   process.env.SARVAM_API_KEY = 'test-key';
   try {
     for (const firstAction of ['compare', 'edit']) {
       let calls = 0;
-      globalThis.fetch = async () => {
+      globalThis.fetch = async (_url, options) => {
         calls++;
         const result =
           calls === 1
@@ -299,22 +299,27 @@ test('comparison repairs a missing pair once and builds both options from the or
                 intent: 'Style the heading',
               }
             : {
-                action: 'compare',
-                reply: 'Two options coming up.',
-                intent: 'Style the heading',
-                directions: [
+                name: calls === 2 ? 'Green' : 'Red',
+                intent: calls === 2 ? 'Green heading' : 'Red heading',
+                patches: [
                   {
-                    name: 'Green',
-                    intent: 'Green heading',
-                    patches: [{ id: 'heading', styles: { color: '#123456' } }],
-                  },
-                  {
-                    name: 'Red',
-                    intent: 'Red heading',
-                    patches: [{ id: 'heading', styles: { color: '#aabbcc' } }],
+                    id: 'heading',
+                    styles: { color: calls === 2 ? '#123456' : '#aabbcc' },
                   },
                 ],
+                changes: [
+                  { id: 'heading', description: 'Updated heading color' },
+                ],
               };
+        if (calls > 1) {
+          const prompt = JSON.parse(options.body).messages[0].content;
+          assert.ok(
+            prompt.includes(
+              calls === 2 ? 'Plan ONLY option 1' : 'Plan ONLY option 2',
+            ),
+          );
+          assert.ok(prompt.includes('SAME original page'));
+        }
         return Response.json({
           choices: [
             {
@@ -334,7 +339,7 @@ test('comparison repairs a missing pair once and builds both options from the or
           elements: [{ id: 'heading', tag: 'h1', text: 'Original' }],
         },
       });
-      assert.equal(calls, 2);
+      assert.equal(calls, 3);
       assert.equal(output.variants.length, 2);
       assert.ok(output.variants[0].html.includes('#123456'));
       assert.ok(!output.variants[0].html.includes('#aabbcc'));

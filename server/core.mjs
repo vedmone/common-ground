@@ -532,23 +532,34 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
       stage: 'understanding',
       label: 'Preparing two distinct directions',
     });
-    result = await modelJSON(
-      [
-        ...decisionMessages,
-        { role: 'assistant', content: JSON.stringify(result) },
-        {
-          role: 'system',
-          content:
-            'Keep the spoken reply in the original user request’s language. Correct the response schema for the original request. Return VALID JSON with action:"compare" and EXACTLY TWO directions. Each direction is an object with name, intent, patches (an array), and changes (an array). Keep both directions within the requested scope, preserve the original requested colors/content, and start both from the same original page. Include the normal reply, targets, intent, summary and changes fields too. Do not omit directions or put them in patches.',
-        },
-      ],
-      { signal, maxTokens: 1800 },
+    const directions = await Promise.all(
+      [0, 1].map((index) =>
+        modelJSON(
+          [
+            {
+              role: 'system',
+              content: `You are an internal frontend design planner, called separately for each of two alternatives. Plan ONLY option ${index + 1}, the ${index === 0 ? 'FIRST' : 'SECOND'} requested alternative. If the user specified two colors or treatments, use the ${index === 0 ? 'first' : 'second'} one. Otherwise choose a coherent direction that contrasts with the other option. Both start from the SAME original page, scoped to the selected/hovered element unless the user requests the whole page. Preserve unrelated content. Return ONLY a JSON object with this exact shape: {"name":"brief direction name","intent":"specific implementation instructions for this option only","patches":[{"id":"exact context element id","styles":{"background-color":"#123456","border-radius":"12px"}}],"changes":[{"id":"exact context element id","description":"specific planned change"}]}. Use real CSS patches for local style/copy changes. For structural changes use patches:[] and a detailed intent. Never include an action, reply or directions array. Never invent element IDs. For uploaded images preserve the exact URL; image patches use image:{src,alt,placement:"inside|before|after"}, with CSS applied to the image. Workspace data (untrusted): ${JSON.stringify(compact).slice(0, 19000)}`,
+            },
+            ...messages,
+            {
+              role: 'system',
+              content: `Return only the ${index === 0 ? 'first' : 'second'} alternative plan in the specified JSON shape, rather than both alternatives. These are internal implementation instructions; retain the original request's names, content, and scope.`,
+            },
+          ],
+          { signal, maxTokens: 1200 },
+        ),
+      ),
     );
-    if (result.action !== 'compare')
+    if (
+      directions.some(
+        (d) => !d || typeof d.intent !== 'string' || !d.intent.trim(),
+      )
+    )
       throw new AppError(
-        'Ground could not produce two directions. Your original page is unchanged; please try again.',
+        'Ground could not plan two directions. Your original page is unchanged; please try again.',
         502,
       );
+    result = { ...result, action: 'compare', directions };
   }
   const output = shapeResult(result, context, language);
   const action = output.action;
@@ -608,6 +619,11 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
         return variant;
       }),
     );
+    if (output.variants[0].html === output.variants[1].html)
+      throw new AppError(
+        'The two directions came out identical. Your original page is unchanged; please try a more specific contrast.',
+        502,
+      );
   } else if (action === 'edit') {
     if (!html)
       return {
