@@ -179,6 +179,11 @@ test('read-only discussion answers with provided styles and never calls the HTML
       },
     });
     assert.equal(calls, 1);
+    assert.equal(
+      request.reasoning_effort,
+      null,
+      'short independent answers do not wait for a reasoning trace',
+    );
     assert.equal(result.route, 'answer');
     assert.match(result.reply, /Georgia/);
     assert.ok(!('html' in result));

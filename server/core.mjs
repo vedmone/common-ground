@@ -225,6 +225,7 @@ export async function modelJSON(
   {
     model = process.env.INTENT_MODEL || 'sarvam-105b-conversations',
     maxTokens = 1200,
+    reasoningEffort,
     onReply,
     onReplyReady,
     signal,
@@ -241,6 +242,9 @@ export async function modelJSON(
       messages,
       max_tokens: maxTokens,
       temperature: 0.35,
+      ...(reasoningEffort !== undefined
+        ? { reasoning_effort: reasoningEffort }
+        : {}),
       response_format: { type: 'json_object' },
       ...(onReply ? { stream: true } : {}),
       ...(!model.startsWith('sarvam-')

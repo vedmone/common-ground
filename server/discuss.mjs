@@ -36,7 +36,7 @@ export async function discuss(body, { signal } = {}) {
       },
       ...messages.slice(-12),
     ],
-    { signal, maxTokens: 650 },
+    { signal, maxTokens: 650, reasoningEffort: null },
   );
   const pureQuestion = isInformationalQuestion(messages.at(-1).content);
   const route =

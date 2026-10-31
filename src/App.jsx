@@ -1183,7 +1183,10 @@ export default function App() {
         const result = await api.discuss(
           {
             messages: toApiMessages(
-              [...L.session.messages, userMsg],
+              [
+                ...L.session.messages.filter((m) => m.lane === 'conversation'),
+                userMsg,
+              ],
               L.session.versions,
             ),
             context: {

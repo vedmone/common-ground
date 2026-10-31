@@ -441,6 +441,12 @@ test(
       assert.equal(calls.length, 1);
       await say('Which font are you using?');
       assert.equal(questionCalls.length, 1);
+      assert.ok(
+        !questionCalls[0].body.messages.some((m) =>
+          /Create a pottery studio|kitna time/.test(m.content),
+        ),
+        'independent discussion history excludes build requests and status chatter',
+      );
       assert.equal(
         calls.length,
         1,
