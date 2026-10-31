@@ -379,3 +379,33 @@ test('an outdated in-flight status clip is skipped when the build completes befo
   assert.equal(await completed, 'ended');
   assert.deepEqual(played, ['Your page is ready.']);
 });
+
+test('prepared speech waits for the human to finish and cancellation during that wait cannot play stale audio', async () => {
+  const played = [],
+    pause = deferred();
+  const queue = new SpeechQueue({
+    async play(audio) {
+      played.push(audio);
+      return 'ended';
+    },
+    stop() {},
+  });
+  const answer = queue.enqueue(async () => ({ audio: 'answer' }), {
+    beforePlay: () => pause.promise,
+  });
+  await flush();
+  assert.deepEqual(played, []);
+  pause.resolve();
+  assert.equal(await answer, 'ended');
+  assert.deepEqual(played, ['answer']);
+  const secondPause = deferred();
+  const stale = queue.enqueue(async () => ({ audio: 'cancelled' }), {
+    beforePlay: () => secondPause.promise,
+  });
+  await flush();
+  queue.cancel();
+  secondPause.resolve();
+  assert.equal(await stale, 'cancelled');
+  await flush();
+  assert.deepEqual(played, ['answer']);
+});

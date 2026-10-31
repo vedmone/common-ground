@@ -36,6 +36,12 @@ export function classifyWorkUtterance(text) {
   )
     return 'cancel';
   if (
+    /^(?:never mind|nevermind|forget (?:it|that)|rehne do|chhodo|chhod do|रहने दो|छोड़ो|छोड़ दो)$/.test(
+      value,
+    )
+  )
+    return 'cancel';
+  if (
     /^(?:(?:okay|ok|please|haan|हाँ) )?(?:continue|resume|retry|try again|start again|start over|carry on|go on|keep going|keep working|proceed|continue building|resume (?:the )?(?:build|page|preview)|phir se (?:banao|shuru karo)|dobara (?:banao|shuru karo)|jaari rakho|banate raho|जारी रखो|फिर से बनाओ|दोबारा बनाओ|दोबारा शुरू करो)$/.test(
       value,
     )

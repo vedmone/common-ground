@@ -172,6 +172,15 @@ async function request(
 }
 
 export const api = {
+  discuss: (payload, signal, base = '', token = '') =>
+    request(`${base}/api/discuss`, {
+      method: 'POST',
+      json: payload,
+      signal,
+      timeout: 55000,
+      label: 'conversation',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }),
   health: (signal) =>
     request('/api/health', { signal, timeout: 8000, label: 'health check' }),
   publish: (payload) =>

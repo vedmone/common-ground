@@ -10,10 +10,16 @@ export class SpeechQueue {
   get busy() {
     return this.entries.length > 0;
   }
-  enqueue(prepare, { onStart, kind = 'reply', isCurrent } = {}) {
+  enqueue(prepare, { onStart, kind = 'reply', isCurrent, beforePlay } = {}) {
     if (kind === 'progress' && this.busy) return Promise.resolve('skipped');
     const controller = new AbortController();
-    const entry = { controller, onStart, isCurrent, epoch: this.epoch };
+    const entry = {
+      controller,
+      onStart,
+      isCurrent,
+      beforePlay,
+      epoch: this.epoch,
+    };
     const outcome = new Promise((resolve, reject) =>
       Object.assign(entry, { resolve, reject }),
     );
@@ -36,6 +42,8 @@ export class SpeechQueue {
       while (this.entries.length && epoch === this.epoch) {
         const entry = this.entries[0];
         const { audio, error } = await entry.prepared;
+        if (!error && entry.beforePlay)
+          await entry.beforePlay(entry.controller.signal);
         if (epoch !== this.epoch || entry.controller.signal.aborted) return;
         if (error) entry.reject(error);
         else if (entry.isCurrent && !entry.isCurrent())

@@ -28,6 +28,15 @@ import HelpPanel from './components/HelpPanel.jsx';
 import TourBanner from './components/TourBanner.jsx';
 import PageEditor from './components/PageEditor.jsx';
 import CompareView from './components/CompareView.jsx';
+import TaskRail from './components/TaskRail.jsx';
+import {
+  addTask,
+  updateTask,
+  taskTitle,
+  nextQueuedTask,
+  inputLane,
+  taskCommand,
+} from './lib/tasks.js';
 import Processing, {
   Walkthrough,
   InterruptedWork,
@@ -99,6 +108,8 @@ function freshSession(project) {
     updatedAt: Date.now(),
     versions: [base],
     messages: [],
+    tasks: [],
+    queuePaused: false,
     currentVersionId: base.id,
   };
 }
@@ -209,7 +220,7 @@ export default function App() {
   const [turn, setTurn] = useState({ phase: 'idle', startedAt: 0 });
   const [transcribing, setTranscribing] = useState(0);
   const [speaking, setSpeaking] = useState(false);
-  const [queued, setQueued] = useState(null);
+  const [discussion, setDiscussion] = useState({ pending: 0, question: '' });
   const [call, setCall] = useState({
     active: false,
     connecting: false,
@@ -271,13 +282,17 @@ export default function App() {
   const speechQueue = useMemo(() => new SpeechQueue(player), [player]);
   const transcribeCtrls = useRef(new Set());
   const utterRefs = useRef(new Map());
-  const queueRef = useRef([]);
-  const queueDispatchTimer = useRef(null);
+  const discussionJobs = useRef(new Map());
+  const voiceEpoch = useRef(0);
+  const lastVoiceCutAt = useRef(0);
+  const speechOwner = useRef(null);
+  const alive = useRef(true);
   const snapshotWaiters = useRef(new Map());
   const levelListeners = useRef(new Set());
   const composerRef = useRef(null);
   const blockedToastAt = useRef(0);
   const chooseComparisonRef = useRef(null);
+  const taskActionRef = useRef(null);
   const walkRef = useRef(null);
   const progressVoiceAt = useRef(0);
   const toastTimers = useRef(new Set());
@@ -313,6 +328,7 @@ export default function App() {
       assets,
       selectedAsset,
       voiceProfile,
+      transcribing,
     };
     walkRef.current = walkthrough;
   });
@@ -348,19 +364,21 @@ export default function App() {
       ),
     [sendToPreview],
   );
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
       tour.cancel(false);
       player.stop();
       turnRef.current?.controller.abort();
       turnRef.current = null;
-      clearTimeout(queueDispatchTimer.current);
+      for (const q of discussionJobs.current.values()) q.controller.abort();
+      discussionJobs.current.clear();
       speechQueue.cancel();
       for (const timer of toastTimers.current) clearTimeout(timer);
       toastTimers.current.clear();
-    },
-    [tour, player],
-  );
+    };
+  }, [tour, player]);
   const stopWalkthrough = useCallback(
     ({ preserveSpeech = false } = {}) => {
       walkRef.current = null;
@@ -437,6 +455,14 @@ export default function App() {
       messages: [...s.messages, ...msgs].slice(-240),
     }));
   }, []);
+  const patchTask = useCallback(
+    (id, patch) =>
+      setSession((s) => ({
+        ...s,
+        tasks: updateTask(s.tasks || [], id, patch),
+      })),
+    [],
+  );
   const patchMessage = useCallback((id, patch) => {
     setSession((s) => ({
       ...s,
@@ -457,18 +483,47 @@ export default function App() {
   );
 
   const commitVersion = useCallback(
-    (v) => {
-      store.set({ ready: false });
-      setSession((s) => ({
-        ...s,
-        versions: [
-          ...s.versions.map((x) =>
-            x.status === 'pending' ? { ...x, status: 'kept' } : x,
-          ),
-          v,
-        ],
-        currentVersionId: v.id,
-      }));
+    (v, { activate = true } = {}) => {
+      if (live.current.session.versions.some((x) => x.id === v.id))
+        v.id = uid('v');
+      if (activate) store.set({ ready: false });
+      const manual = !v.taskId && v.origin !== 'demo';
+      if (manual) v.taskId = uid('task');
+      setSession((s) => {
+        const canActivate =
+          activate && (!v.parentId || s.currentVersionId === v.parentId);
+        return {
+          ...s,
+          versions: [
+            ...s.versions.map((x) =>
+              canActivate && x.status === 'pending'
+                ? { ...x, status: 'kept' }
+                : x,
+            ),
+            v,
+          ],
+          currentVersionId: canActivate ? v.id : s.currentVersionId,
+          tasks: manual
+            ? addTask(s.tasks || [], {
+                id: v.taskId,
+                seq: Math.max(0, ...(s.tasks || []).map((t) => t.seq)) + 1,
+                title: v.summary,
+                request: v.intent || v.summary,
+                kind: 'manual',
+                state: 'ready',
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                finishedAt: Date.now(),
+                resultVersionId: v.id,
+                applied: canActivate,
+                attempt: 1,
+              })
+            : updateTask(s.tasks || [], v.taskId, {
+                resultVersionId: v.id,
+                applied: canActivate,
+              }),
+        };
+      });
     },
     [store],
   );
@@ -606,31 +661,42 @@ export default function App() {
 
   /* ---------- interrupt ---------- */
   const interrupt = useCallback(
-    ({ silent = false } = {}) => {
+    ({ silent = false, scope = 'all' } = {}) => {
       const active = turnRef.current;
       const hadTurn = !!active;
+      if (active?.work) active.work.state = 'cancelled';
       if (active)
         setSession((s) =>
           s.work?.id === active.id
             ? {
                 ...s,
                 work: { ...s.work, state: 'cancelled', finishedAt: Date.now() },
+                tasks: updateTask(s.tasks || [], active.work?.taskId, {
+                  state: 'cancelled',
+                  finishedAt: Date.now(),
+                }),
+                queuePaused: true,
               }
             : s,
         );
       turnRef.current?.controller.abort();
       turnRef.current = null;
-      speechQueue.cancel();
-      for (const c of transcribeCtrls.current) c.abort();
-      transcribeCtrls.current.clear();
       const wasSpeaking = player.playing;
-      player.stop();
+      if (scope === 'all') {
+        voiceEpoch.current++;
+        speechQueue.cancel();
+        for (const q of discussionJobs.current.values()) q.controller.abort();
+        discussionJobs.current.clear();
+        setDiscussion({ pending: 0, question: '' });
+        for (const c of transcribeCtrls.current) c.abort();
+        transcribeCtrls.current.clear();
+        stopWalkthrough();
+      } else if (
+        speechOwner.current?.kind === 'task' &&
+        speechOwner.current.id === active?.id
+      )
+        player.stop();
       tour.cancel();
-      stopWalkthrough();
-      clearTimeout(queueDispatchTimer.current);
-      queueDispatchTimer.current = null;
-      queueRef.current = [];
-      setQueued(null);
       setTurn({ phase: 'idle', startedAt: 0 });
       if (!silent && (hadTurn || wasSpeaking))
         note(
@@ -647,7 +713,15 @@ export default function App() {
   const speakText = useCallback(
     async (
       text,
-      { messageId, onStart, language, kind = 'reply', isCurrent } = {},
+      {
+        messageId,
+        onStart,
+        language,
+        kind = 'reply',
+        isCurrent,
+        owner,
+        afterQuestions = false,
+      } = {},
     ) => {
       const {
         health: h,
@@ -655,10 +729,29 @@ export default function App() {
         companion: comp,
         voiceProfile: profile,
       } = live.current;
+      const projectAtSpeech = live.current.project.id,
+        voiceAtSpeech = voiceEpoch.current;
+      const clipOwner =
+        owner ||
+        (turnRef.current ? { kind: 'task', id: turnRef.current.id } : null);
       const viaCompanion =
         !h.voice && comp.status === 'connected' && comp.info?.voice;
       if (!h.voice && !viaCompanion) return 'unavailable';
       try {
+        if (afterQuestions)
+          while (discussionJobs.current.size && alive.current)
+            await Promise.allSettled(
+              [...discussionJobs.current.values()].map((q) => q.done),
+            );
+        if (
+          !alive.current ||
+          voiceAtSpeech !== voiceEpoch.current ||
+          live.current.project.id !== projectAtSpeech ||
+          (afterQuestions &&
+            !live.current.call.active &&
+            !live.current.settings.readAloud)
+        )
+          return 'cancelled';
         const result = await speechQueue.enqueue(
           (signal) =>
             viaCompanion
@@ -677,7 +770,17 @@ export default function App() {
           {
             kind,
             isCurrent,
+            beforePlay: async (signal) => {
+              while (
+                !signal.aborted &&
+                alive.current &&
+                (['hearing', 'recording'].includes(voiceRef.current?.state) ||
+                  live.current.transcribing > 0)
+              )
+                await new Promise((resolve) => setTimeout(resolve, 60));
+            },
             onStart: (duration) => {
+              speechOwner.current = clipOwner;
               setSpeakingMessageId(messageId || null);
               onStart?.(duration);
             },
@@ -699,6 +802,19 @@ export default function App() {
     [player, speechQueue, toast],
   );
 
+  const stopVoice = useCallback(() => {
+    lastVoiceCutAt.current = Date.now();
+    voiceEpoch.current++;
+    speechQueue.cancel();
+    for (const q of discussionJobs.current.values()) q.controller.abort();
+    discussionJobs.current.clear();
+    setDiscussion({ pending: 0, question: '' });
+  }, [speechQueue]);
+  const stopForeground = useCallback(() => {
+    if (player.playing || speechQueue.busy || discussionJobs.current.size)
+      stopVoice();
+    else if (turnRef.current) interrupt({ scope: 'work' });
+  }, [player, speechQueue, stopVoice, interrupt]);
   const listen = useCallback(
     (message) => {
       if (speakingMessageId === message.id) {
@@ -723,6 +839,7 @@ export default function App() {
       if (
         t.phase !== 'building' ||
         turnRef.current?.speechInterrupted ||
+        discussionJobs.current.size > 0 ||
         Date.now() - t.startedAt < 10000 ||
         Date.now() - progressVoiceAt.current < 14000 ||
         player.playing ||
@@ -908,16 +1025,23 @@ export default function App() {
     [appendMessages, store, toast, tour],
   );
 
-  const keep = useCallback(() => {
-    const cur = currentOf(live.current.session);
-    setSession((x) => ({
-      ...x,
-      versions: x.versions.map((v) =>
-        v.id === cur.id ? { ...v, status: 'kept' } : v,
-      ),
-    }));
-    toast(`Kept “${clip(cur.summary, 40)}”.`, 'success', 2600);
-  }, [toast]);
+  const keep = useCallback(
+    (versionId) => {
+      const cur =
+        typeof versionId === 'string'
+          ? live.current.session.versions.find((v) => v.id === versionId)
+          : currentOf(live.current.session);
+      if (!cur) return;
+      setSession((x) => ({
+        ...x,
+        versions: x.versions.map((v) =>
+          v.id === cur.id ? { ...v, status: 'kept' } : v,
+        ),
+      }));
+      toast(`Kept “${clip(cur.summary, 40)}”.`, 'success', 2600);
+    },
+    [toast],
+  );
 
   const restore = useCallback(
     (id) => {
@@ -954,83 +1078,247 @@ export default function App() {
   /* ---------- the conversational turn ---------- */
   const runTurnRef = useRef(null);
 
-  const finishTurn = useCallback(
-    (id) => {
-      if (turnRef.current?.id !== id) return;
-      const completed = turnRef.current.work;
-      turnRef.current = null;
-      setTurn({ phase: 'idle', startedAt: 0 });
-      if (completed?.state === 'failed') {
-        queueRef.current = [];
-        setQueued(null);
-        return;
-      }
-      const next = queueRef.current.shift();
-      if (
-        next &&
-        completed?.task === 'create' &&
-        completed.state === 'answered'
-      ) {
-        next.text = continueCreation(completed.request, next.text);
-        next.opts.task = 'create';
-      }
-      setQueued(
-        queueRef.current.length
-          ? queueRef.current.map((x) => clip(x.text, 70)).join(' · ')
-          : null,
-      );
-      if (next)
-        queueDispatchTimer.current = setTimeout(() => {
-          queueDispatchTimer.current = null;
-          if (live.current.project.id !== next.projectId) return;
-          const freshReference = next.opts.reference;
-          const ids = new Set(store.elements.map((e) => e.id));
-          const reference = freshReference
-            ? {
-                ...freshReference,
-                selection: ids.has(freshReference.selection?.id)
-                  ? freshReference.selection
-                  : null,
-                hover: ids.has(freshReference.hover?.id)
-                  ? freshReference.hover
-                  : null,
-              }
-            : undefined;
-          runTurnRef.current?.(next.text, { ...next.opts, reference });
-        }, 50);
+  const finishTurn = useCallback((id) => {
+    if (turnRef.current?.id !== id) return;
+    turnRef.current = null;
+    setTurn({ phase: 'idle', startedAt: 0 });
+  }, []);
+
+  const enqueueWork = useCallback(
+    (text, opts, reference, profile, userMsg) => {
+      const L = live.current,
+        existing = (L.session.tasks || []).find((t) => t.id === opts.taskId),
+        id = opts.taskId || uid('task');
+      const kind =
+        existing?.kind ||
+        (opts.task === 'create' ||
+        (!turnRef.current &&
+          !hasPageContent(L.current.html) &&
+          isCreationRequest(text))
+          ? 'create'
+          : (opts.compare ?? L.compareMode)
+            ? 'compare'
+            : 'edit');
+      const request = opts.requestOverride || existing?.request || text;
+      setSession((s) => ({
+        ...s,
+        queuePaused: opts.taskId ? false : s.queuePaused,
+        tasks: addTask(s.tasks || [], {
+          ...existing,
+          id,
+          seq:
+            existing?.seq ||
+            Math.max(0, ...(s.tasks || []).map((t) => t.seq)) + 1,
+          title: opts.title || existing?.title || taskTitle(text),
+          request,
+          kind,
+          state: 'queued',
+          question: '',
+          error: '',
+          createdAt: existing?.createdAt || Date.now(),
+          updatedAt: Date.now(),
+          attempt: existing?.attempt || 0,
+          target:
+            opts.retarget && (reference.selection || reference.hover)
+              ? refSummary(reference)
+              : existing?.target || refSummary(reference),
+          sourceMessageId: userMsg.id,
+          via: opts.via || 'text',
+        }),
+      }));
+      if (opts.messageLogged)
+        patchMessage(userMsg.id, { taskId: id, lane: 'work' });
+      else appendMessages({ ...userMsg, taskId: id, lane: 'work' });
+      return id;
     },
-    [store],
+    [appendMessages, patchMessage],
   );
 
   const resumeWork = useCallback(() => {
     const L = live.current;
     if (turnRef.current) return;
-    const work = recoverableBuild(L.session);
-    if (!work) return;
-    let reference;
-    if (work.task === 'edit' && work.target) {
-      const target =
-        store.elements.find((e) => e.id === work.target.id) ||
-        store.getSnapshot().selection;
-      if (!target) {
-        const content =
-          L.voiceProfile.style === 'hinglish'
-            ? 'वह element अभी नहीं मिल रहा. Page पर उसे select करके फिर “resume build” बोलिए.'
-            : 'Select the original element on the page, then say “resume build”. I can’t find its saved reference.';
-        toast(content, 'info');
-        if (L.call.active && !L.call.speakerMuted)
-          speakText(content, { language: L.voiceProfile.style });
-        return;
+    const task =
+      (L.session.tasks || []).find(
+        (t) =>
+          t.id === L.session.work?.taskId &&
+          ['failed', 'interrupted', 'cancelled'].includes(t.state),
+      ) ||
+      [...(L.session.tasks || [])]
+        .reverse()
+        .find((t) => ['failed', 'interrupted'].includes(t.state));
+    const old = recoverableBuild(L.session);
+    if (task)
+      runTurnRef.current?.(task.request, {
+        taskId: task.id,
+        forceWork: true,
+        via: 'resume',
+        task: task.kind === 'create' ? 'create' : 'edit',
+        compare: task.kind === 'compare',
+      });
+    else if (old)
+      runTurnRef.current?.(old.request, {
+        forceWork: true,
+        task: old.task,
+        via: 'resume',
+      });
+    else setSession((s) => ({ ...s, queuePaused: false }));
+  }, []);
+
+  const answerQuestion = useCallback(
+    async (text, opts, reference, profile, userMsg) => {
+      const L = live.current,
+        projectAtStart = L.project.id,
+        epoch = voiceEpoch.current,
+        controller = new AbortController(),
+        qid = uid('question');
+      if (turnRef.current) turnRef.current.speechInterrupted = false;
+      let resolveDone;
+      const done = new Promise((resolve) => (resolveDone = resolve));
+      discussionJobs.current.set(qid, { controller, done, question: text });
+      setDiscussion({ pending: discussionJobs.current.size, question: text });
+      appendMessages({ ...userMsg, lane: 'conversation' });
+      try {
+        const st = L.settings,
+          viaCompanion = !L.health.chat && L.companion.status === 'connected';
+        const result = await api.discuss(
+          {
+            messages: toApiMessages(
+              [...L.session.messages, userMsg],
+              L.session.versions,
+            ),
+            context: {
+              selection: reference.selection,
+              hover: reference.hover,
+              elements: store.elements,
+              pageTitle: store.getSnapshot().title || L.project.name,
+            },
+            tasks: (L.session.tasks || []).map(({ seq, title, state }) => ({
+              seq,
+              title,
+              state,
+            })),
+            language: profile.language,
+            voiceStyle: profile.style,
+          },
+          controller.signal,
+          viaCompanion ? companionApi.normalizeBase(st.companionUrl) : '',
+          viaCompanion ? st.companionToken : '',
+        );
+        if (
+          controller.signal.aborted ||
+          live.current.project.id !== projectAtStart
+        )
+          return;
+        if (result.route === 'task') {
+          enqueueWork(
+            text,
+            {
+              ...opts,
+              messageLogged: true,
+              forceWork: true,
+              compare: result.kind === 'compare',
+              title: result.summary,
+              requestOverride: result.intent
+                ? `${text}\nRequested direction: ${result.intent}`
+                : text,
+            },
+            reference,
+            profile,
+            userMsg,
+          );
+          const content =
+            profile.style === 'hinglish'
+              ? 'यह task जोड़ दिया है. बाकी work अपनी जगह चलता रहेगा.'
+              : 'Added that as a task. The work continues independently.';
+          appendMessages({
+            id: uid('m'),
+            role: 'assistant',
+            content,
+            at: Date.now(),
+            language: profile.style,
+            local: true,
+            progress: true,
+          });
+          if (live.current.call.active && !live.current.call.speakerMuted)
+            speakText(content, {
+              language: profile.style,
+              owner: { kind: 'question', id: qid },
+              onStart: (d) => tour.syncToAudio(d),
+              isCurrent: () => voiceEpoch.current === epoch,
+            });
+        } else {
+          const mid = uid('m');
+          const answerTargets =
+            live.current.current.id === L.current.id
+              ? resolveTargets(result.targets || [], store.elements)
+              : [];
+          if (answerTargets.length)
+            tour.start(answerTargets, {
+              reply: result.reply,
+              tone: 'point',
+              expectAudio: L.call.active && !L.call.speakerMuted,
+            });
+          const reply =
+            live.current.current.id !== L.current.id
+              ? `${profile.style === 'hinglish' ? 'आपने जिस preview पर पूछा था, उसके लिए:' : 'For the preview you were looking at:'} ${result.reply}`
+              : result.reply;
+          appendMessages({
+            id: mid,
+            role: 'assistant',
+            content: reply,
+            at: Date.now(),
+            language: result.voiceStyle || profile.style,
+            action: result.route === 'clarify' ? 'clarify' : 'none',
+            lane: 'conversation',
+            local: true,
+          });
+          if (live.current.call.active && !live.current.call.speakerMuted)
+            speakText(reply, {
+              messageId: mid,
+              language: result.voiceStyle || profile.style,
+              owner: { kind: 'question', id: qid },
+              isCurrent: () =>
+                voiceEpoch.current === epoch &&
+                live.current.project.id === projectAtStart,
+            });
+        }
+      } catch (error) {
+        if (!isAbort(error) && live.current.project.id === projectAtStart) {
+          const content =
+            profile.style === 'hinglish'
+              ? turnRef.current
+                ? 'इस question का जवाब अभी नहीं आ पाया. Page वाला task चलता रहेगा.'
+                : 'इस question का जवाब अभी नहीं आ पाया. आपकी page unchanged है.'
+              : turnRef.current
+                ? 'I couldn’t answer that question. Your page task is still running.'
+                : 'I couldn’t answer that question right now. Your page is unchanged.';
+          appendMessages({
+            id: uid('m'),
+            role: 'assistant',
+            content,
+            at: Date.now(),
+            lane: 'conversation',
+            language: profile.style,
+            local: true,
+          });
+          if (L.call.active && !L.call.speakerMuted)
+            speakText(content, {
+              language: profile.style,
+              isCurrent: () => voiceEpoch.current === epoch,
+            });
+        }
+      } finally {
+        discussionJobs.current.delete(qid);
+        resolveDone();
+        const pending = [...discussionJobs.current.values()];
+        setDiscussion({
+          pending: pending.length,
+          question: pending.at(-1)?.question || '',
+        });
       }
-      reference = { selection: target, hover: null, trail: [] };
-    }
-    runTurnRef.current?.(work.request, {
-      task: work.task,
-      via: 'resume',
-      followups: work.followups || [],
-      reference,
-    });
-  }, [store, toast, speakText]);
+    },
+    [appendMessages, enqueueWork, speakText, store],
+  );
 
   const sendTurn = useCallback(
     async (rawText, opts = {}) => {
@@ -1039,6 +1327,14 @@ export default function App() {
         .slice(0, 5000);
       if (!text) return;
       const L = live.current;
+      const executingTask = opts.executeTaskId
+        ? (L.session.tasks || []).find((t) => t.id === opts.executeTaskId)
+        : null;
+      if (
+        opts.executeTaskId &&
+        (!executingTask || executingTask.state !== 'queued')
+      )
+        return;
       if (walkRef.current) stopWalkthrough();
       const reference = opts.reference || captureReference();
       const userMsg = {
@@ -1049,98 +1345,237 @@ export default function App() {
         via: opts.via || 'text',
         ref: refSummary(reference),
       };
-      const profile = conversationLanguage(
-        [...L.session.messages, userMsg],
-        L.voiceProfile.style || opts.language || L.settings.language,
-      );
+      const profile = executingTask
+        ? L.voiceProfile
+        : conversationLanguage(
+            [...L.session.messages, userMsg],
+            L.voiceProfile.style || opts.language || L.settings.language,
+          );
       const language = profile.style;
       userMsg.language = language;
-      setSession((s) => ({ ...s, voiceStyle: language }));
-      setDetectedLanguage(language);
-      const active = turnRef.current;
-      const conversationalIntent = classifyWorkUtterance(text);
-      const recovery = recoverableBuild(L.session);
-      const respondAboutWork = (kind) => {
-        const content = workReply(kind, {
-          active: !!active,
-          work: active?.work || recovery || L.session.work,
-          turn: active
-            ? {
-                phase: active.stage || L.turn.phase,
-                lastProgressAt: active.lastProgressAt,
-                startedAt: active.startedAt,
-              }
-            : L.turn,
-          hasPage:
-            hasPageContent(L.current.html) ||
-            (L.project.id === 'companion' &&
-              L.companion.status === 'connected'),
-          language,
-        });
-        if (active) active.speechInterrupted = false;
-        appendMessages(userMsg, {
-          id: uid('m'),
-          role: 'assistant',
-          content,
-          at: Date.now(),
-          language,
-          local: true,
-          progress: !!active,
-        });
-        if (L.call.active && !L.call.speakerMuted)
-          speakText(content, {
+      if (!executingTask) {
+        setSession((s) => ({ ...s, voiceStyle: language }));
+        setDetectedLanguage(language);
+      }
+      if (!executingTask) {
+        const taskControl = taskCommand(text);
+        if (taskControl) {
+          appendMessages(userMsg);
+          if (taskControl.action === 'continue') {
+            taskActionRef.current?.(null, 'continue');
+            return;
+          }
+          const target = (L.session.tasks || []).find(
+            (t) => t.seq === taskControl.seq,
+          );
+          if (target) taskActionRef.current?.(target, taskControl.action);
+          else {
+            const content = `I can’t find task ${taskControl.seq} in this page.`;
+            appendMessages({
+              id: uid('m'),
+              role: 'assistant',
+              content,
+              at: Date.now(),
+              local: true,
+            });
+            if (L.call.active && !L.call.speakerMuted)
+              speakText(content, { language });
+          }
+          return;
+        }
+        const active = turnRef.current;
+        const conversationalIntent = classifyWorkUtterance(text);
+        const recovery = recoverableBuild(L.session);
+        const respondAboutWork = (kind) => {
+          const content = workReply(kind, {
+            active: !!active,
+            work: active?.work || recovery || L.session.work,
+            turn: active
+              ? {
+                  phase: active.stage || L.turn.phase,
+                  lastProgressAt: active.lastProgressAt,
+                  startedAt: active.startedAt,
+                }
+              : L.turn,
+            hasPage:
+              hasPageContent(L.current.html) ||
+              (L.project.id === 'companion' &&
+                L.companion.status === 'connected'),
             language,
-            kind: 'status',
-            isCurrent: () =>
-              active ? turnRef.current?.id === active.id : !turnRef.current,
           });
-      };
-      const lastConversationReply = [...L.session.messages]
-        .reverse()
-        .find((m) => m.role === 'assistant' && !m.progress);
-      const acknowledgesAProposal =
-        L.session.work?.awaitingClarification ||
-        lastConversationReply?.action === 'clarify';
-      const acceptsAnActualVersion =
-        KEEP_RE.test(text) &&
-        L.current.status === 'pending' &&
-        !acknowledgesAProposal;
-      if (
-        conversationalIntent === 'status' ||
-        (!active &&
-          conversationalIntent === 'acknowledge' &&
-          !acceptsAnActualVersion &&
-          !acknowledgesAProposal) ||
-        (!active && conversationalIntent === 'resume' && !recovery) ||
-        (active && ['acknowledge', 'resume'].includes(conversationalIntent)) ||
-        (!active && recovery && conversationalIntent === 'acknowledge')
-      ) {
-        respondAboutWork(conversationalIntent);
-        return;
-      }
-      if (conversationalIntent === 'resume' && recovery && !active) {
-        appendMessages(userMsg);
-        resumeWork();
-        return;
-      }
-      if (conversationalIntent === 'silence') {
-        if (active) active.speechInterrupted = true;
-        speechQueue.cancel();
-        appendMessages(userMsg);
-        return;
-      }
-      if (conversationalIntent === 'cancel') {
-        appendMessages(userMsg);
-        interrupt();
-        return;
-      }
-      if (active && !UNDO_RE.test(text)) {
-        active.speechInterrupted = false;
-        if (queueRef.current.length >= 8) {
-          const content =
-            language === 'hinglish'
-              ? 'आठ changes अभी बाकी हैं. पहले इन्हें पूरा कर लूँ, फिर अगला जोड़ते हैं.'
-              : 'I have eight changes waiting. Let me finish those before adding more.';
+          if (active) active.speechInterrupted = false;
+          appendMessages(userMsg, {
+            id: uid('m'),
+            role: 'assistant',
+            content,
+            at: Date.now(),
+            language,
+            local: true,
+            progress: !!active,
+          });
+          if (L.call.active && !L.call.speakerMuted)
+            speakText(content, {
+              language,
+              kind: 'status',
+              isCurrent: () =>
+                active ? turnRef.current?.id === active.id : !turnRef.current,
+            });
+        };
+        const lastConversationReply = [...L.session.messages]
+          .reverse()
+          .find((m) => m.role === 'assistant' && !m.progress);
+        const acknowledgesAProposal =
+          L.session.work?.awaitingClarification ||
+          lastConversationReply?.action === 'clarify';
+        const acceptsAnActualVersion =
+          KEEP_RE.test(text) &&
+          L.current.status === 'pending' &&
+          !acknowledgesAProposal;
+        if (
+          conversationalIntent === 'status' ||
+          (!active &&
+            conversationalIntent === 'acknowledge' &&
+            !acceptsAnActualVersion &&
+            !acknowledgesAProposal) ||
+          (!active && conversationalIntent === 'resume' && !recovery) ||
+          (active &&
+            ['acknowledge', 'resume'].includes(conversationalIntent)) ||
+          (!active && recovery && conversationalIntent === 'acknowledge')
+        ) {
+          respondAboutWork(conversationalIntent);
+          return;
+        }
+        if (conversationalIntent === 'resume' && recovery && !active) {
+          appendMessages(userMsg);
+          resumeWork();
+          return;
+        }
+        if (conversationalIntent === 'silence') {
+          if (active) active.speechInterrupted = true;
+          stopVoice();
+          appendMessages(userMsg);
+          return;
+        }
+        if (conversationalIntent === 'cancel') {
+          appendMessages(userMsg);
+          if (
+            /^(?:stop|ruko|ruk jao|bas|रुको|बस)[.! ]*$/i.test(text) &&
+            (reference.interruptedVoice ||
+              player.playing ||
+              speechQueue.busy ||
+              discussionJobs.current.size ||
+              Date.now() - lastVoiceCutAt.current < 8000)
+          )
+            stopVoice();
+          else if (!active) {
+            const waiting = (L.session.tasks || []).find((t) =>
+              ['needs_detail', 'needs_choice'].includes(t.state),
+            );
+            if (waiting) taskActionRef.current?.(waiting, 'cancel');
+            else interrupt({ scope: 'work' });
+          } else interrupt({ scope: 'work' });
+          return;
+        }
+        const pendingDetail = (L.session.tasks || []).find(
+          (t) => t.state === 'needs_detail',
+        );
+        const explicitQuestion =
+          /^(?:what|why|which|how|where|when|explain|tell me|kya|kyun|kaun|kaisa|क्यों|क्या|कौन|कैसे)(?:\s|$)/i.test(
+            text,
+          ) || /[?？]$/.test(text);
+        if (
+          pendingDetail &&
+          !opts.taskId &&
+          !explicitQuestion &&
+          inputLane(text) !== 'work' &&
+          !UNDO_RE.test(text)
+        ) {
+          enqueueWork(
+            text,
+            {
+              ...opts,
+              taskId: pendingDetail.id,
+              requestOverride: continueCreation(pendingDetail.request, text),
+              retarget: true,
+              forceWork: true,
+            },
+            reference,
+            profile,
+            userMsg,
+          );
+          return;
+        }
+        if (
+          /^(?:please )?(?:give me (?:a |the )?tour|tour (?:the |this )?(?:page|website)|walk me through (?:the |this )?(?:page|website)|(?:page|website) ka tour (?:do|dikhao))[.! ]*$/i.test(
+            text,
+          )
+        ) {
+          appendMessages({ ...userMsg, lane: 'conversation' });
+          startWalkthrough(pageTour(store.elements, language), { language });
+          return;
+        }
+        if (
+          /^(?:please )?(?:end (?:the |this )?call|hang up|leave (?:the )?call|call band (?:kar do|karo))[.! ]*$/i.test(
+            text,
+          )
+        ) {
+          appendMessages({ ...userMsg, lane: 'conversation' });
+          endCall();
+          return;
+        }
+        if (
+          !opts.forceWork &&
+          !opts.task &&
+          !opts.taskId &&
+          !UNDO_RE.test(text) &&
+          !(L.comparison && comparisonChoice(text) !== null) &&
+          !(KEEP_RE.test(text) && L.current.status === 'pending') &&
+          inputLane(text) === 'conversation'
+        ) {
+          answerQuestion(text, opts, reference, profile, userMsg);
+          return;
+        }
+        if (
+          KEEP_RE.test(text) &&
+          L.current.status === 'pending' &&
+          (!acknowledgesAProposal || /^keep\b/i.test(text))
+        ) {
+          appendMessages({ ...userMsg, taskId: L.current.taskId });
+          keep(L.current.id);
+          if (active) active.speechInterrupted = false;
+          const content = commandReply('keep', language);
+          appendMessages({
+            id: uid('m'),
+            role: 'assistant',
+            content,
+            at: Date.now(),
+            language,
+            local: true,
+          });
+          if (L.call.active && !L.call.speakerMuted)
+            speakText(content, { language });
+          return;
+        }
+        if (active && !UNDO_RE.test(text)) {
+          active.speechInterrupted = false;
+          if (
+            (L.session.tasks || []).filter((t) => t.state === 'queued')
+              .length >= 8
+          ) {
+            const content =
+              'Eight changes are waiting. Let me finish those before adding another.';
+            appendMessages({
+              id: uid('m'),
+              role: 'assistant',
+              content,
+              at: Date.now(),
+              local: true,
+              progress: true,
+            });
+            return;
+          }
+          enqueueWork(text, opts, reference, profile, userMsg);
+          const content = workReply('revision', { active: true, language });
           appendMessages({
             id: uid('m'),
             role: 'assistant',
@@ -1154,121 +1589,99 @@ export default function App() {
             speakText(content, { language });
           return;
         }
-        queueRef.current.push({
-          text,
-          projectId: L.project.id,
-          opts: { ...opts, reference },
-        });
-        setQueued(queueRef.current.map((x) => clip(x.text, 70)).join(' · '));
-        active.speechInterrupted = false;
-        const content = workReply('revision', { active: true, language });
-        appendMessages({
-          id: uid('m'),
-          role: 'assistant',
-          content,
-          at: Date.now(),
-          language,
-          local: true,
-          progress: true,
-        });
-        setSession((s) =>
-          s.work?.id === active.id
-            ? {
-                ...s,
-                work: {
-                  ...s.work,
-                  followups: queueRef.current.map((x) => x.text),
-                },
-              }
-            : s,
-        );
-        if (L.call.active && !L.call.speakerMuted)
-          speakText(content, { language });
-        return;
-      }
-      if (L.comparison) {
-        const choice = comparisonChoice(text);
-        if (choice !== null) {
-          appendMessages(userMsg);
-          await chooseComparisonRef.current?.(choice);
-          return;
+        if (L.comparison) {
+          const choice = comparisonChoice(text);
+          if (choice !== null) {
+            appendMessages(userMsg);
+            await chooseComparisonRef.current?.(choice);
+            return;
+          }
+          if (
+            /^(cancel|neither|keep the original|original|undo)[.! ]*$/i.test(
+              text,
+            )
+          ) {
+            patchTask(L.comparison.taskId, {
+              state: 'cancelled',
+              finishedAt: Date.now(),
+            });
+            setComparison(null);
+            appendMessages(userMsg);
+            toast('Comparison closed. The original page is still here.');
+            return;
+          }
         }
-        setComparison(null);
-        if (
-          /^(cancel|neither|keep the original|original|undo)[.! ]*$/i.test(text)
-        ) {
-          appendMessages(userMsg);
-          toast('Comparison closed. The original page is still here.');
-          return;
-        }
-      }
 
-      if (UNDO_RE.test(text)) {
-        interrupt({ silent: true });
-        appendMessages(userMsg);
-        const didUndo = await undo({ announce: true, language });
-        if (L.call.active && !L.call.speakerMuted)
-          speakText(
-            didUndo
-              ? commandReply('undo', language)
-              : spokenUI('nothingUndo', language),
-            {
-              language,
-            },
-          );
-        return;
-      }
-      const lastReply = [...L.session.messages]
-        .reverse()
-        .find((m) => m.role === 'assistant');
-      if (
-        KEEP_RE.test(text) &&
-        currentOf(L.session).status === 'pending' &&
-        lastReply?.action !== 'clarify'
-      ) {
-        interrupt({ silent: true });
-        appendMessages(userMsg);
-        keep();
-        const reply = commandReply('keep', language);
-        appendMessages({
-          id: uid('m'),
-          role: 'assistant',
-          content: reply,
-          at: Date.now(),
-          local: true,
-        });
-        if (L.call.active && !L.call.speakerMuted)
-          speakText(reply, { language });
-        return;
-      }
-      if (STOP_RE.test(text)) {
-        appendMessages(userMsg);
-        interrupt();
-        return;
-      }
-      if (L.demo) setDemo(null);
-      const chatReady =
-        L.project.id === 'companion'
-          ? L.companion.status === 'connected'
-          : L.health.chat;
-      if (!chatReady) {
-        appendMessages(userMsg, {
-          id: uid('m'),
-          role: 'note',
-          tone: 'error',
-          at: Date.now(),
-          content:
-            L.project.id === 'companion'
-              ? 'The companion is not connected, so Ground cannot reach your project. Open Setup to connect it.'
-              : L.health.status === 'error'
-                ? `Ground can’t reach the server: ${L.health.message} Your page is unchanged.`
-                : 'Ground’s AI is not configured on this server yet (missing provider key). You can still explore, undo, and run the scripted demo.',
-        });
+        if (UNDO_RE.test(text)) {
+          if (!active) interrupt({ silent: true });
+          else active.speechInterrupted = false;
+          appendMessages(userMsg);
+          const didUndo = await undo({ announce: true, language });
+          if (L.call.active && !L.call.speakerMuted)
+            speakText(
+              didUndo
+                ? commandReply('undo', language)
+                : spokenUI('nothingUndo', language),
+              {
+                language,
+              },
+            );
+          return;
+        }
+        const lastReply = [...L.session.messages]
+          .reverse()
+          .find((m) => m.role === 'assistant');
+        if (
+          KEEP_RE.test(text) &&
+          currentOf(L.session).status === 'pending' &&
+          lastReply?.action !== 'clarify'
+        ) {
+          interrupt({ silent: true });
+          appendMessages(userMsg);
+          keep();
+          const reply = commandReply('keep', language);
+          appendMessages({
+            id: uid('m'),
+            role: 'assistant',
+            content: reply,
+            at: Date.now(),
+            local: true,
+          });
+          if (L.call.active && !L.call.speakerMuted)
+            speakText(reply, { language });
+          return;
+        }
+        if (STOP_RE.test(text)) {
+          appendMessages(userMsg);
+          interrupt();
+          return;
+        }
+        if (L.demo) setDemo(null);
+        const chatReady =
+          L.project.id === 'companion'
+            ? L.companion.status === 'connected'
+            : L.health.chat;
+        if (!chatReady) {
+          appendMessages(userMsg, {
+            id: uid('m'),
+            role: 'note',
+            tone: 'error',
+            at: Date.now(),
+            content:
+              L.project.id === 'companion'
+                ? 'The companion is not connected, so Ground cannot reach your project. Open Setup to connect it.'
+                : L.health.status === 'error'
+                  ? `Ground can’t reach the server: ${L.health.message} Your page is unchanged.`
+                  : 'Ground’s AI is not configured on this server yet (missing provider key). You can still explore, undo, and run the scripted demo.',
+          });
+          return;
+        }
+
+        enqueueWork(text, opts, reference, profile, userMsg);
         return;
       }
 
       tour.cancel(false);
-      speechQueue.cancel();
       player.setVolume(1);
       const controller = new AbortController();
       const id = uid('turn');
@@ -1298,25 +1711,19 @@ export default function App() {
         startedAt: Date.now(),
         characters: 0,
       });
-      appendMessages(userMsg);
-
-      const history = toApiMessages(
-        [...L.session.messages, userMsg],
-        L.session.versions,
-      );
+      const recorded = executingTask?.sourceMessageId;
+      const boundary = recorded
+        ? L.session.messages.findIndex((m) => m.id === recorded)
+        : -1;
+      const workMessages =
+        boundary >= 0
+          ? L.session.messages.slice(0, boundary + 1)
+          : [...L.session.messages, userMsg];
+      const history = toApiMessages(workMessages, L.session.versions);
       const curVersion = currentOf(L.session);
-      const continuingCreation =
-        L.session.work?.task === 'create' &&
-        acknowledgesAProposal &&
-        !hasPageContent(curVersion.html);
-      const fullCreationRequest = continuingCreation
-        ? continueCreation(L.session.work.request, text)
-        : text;
-      if (continuingCreation)
-        history[history.length - 1] = {
-          ...history.at(-1),
-          content: fullCreationRequest,
-        };
+      const fullCreationRequest = text;
+      if (history.length)
+        history[history.length - 1] = { ...history.at(-1), content: text };
       const selection = reference.selection
         ? { ...reference.selection, locked: true }
         : reference.hover
@@ -1343,34 +1750,34 @@ export default function App() {
         compare:
           projectAtStart !== 'companion' && (opts.compare ?? L.compareMode),
         task:
-          opts.task ||
-          (continuingCreation ||
-          (L.project.id.startsWith('custom_') &&
-            !hasPageContent(curVersion.html) &&
-            isCreationRequest(text))
-            ? 'create'
-            : 'edit'),
+          opts.task || (executingTask?.kind === 'create' ? 'create' : 'edit'),
       };
-      if (opts.followups?.length) {
-        queueRef.current = opts.followups.slice(0, 8).map((followup) => ({
-          text: followup,
-          projectId: projectAtStart,
-          opts: { via: 'resume-followup' },
-        }));
-        setQueued(queueRef.current.map((x) => clip(x.text, 70)).join(' · '));
-      }
       const work = {
         id,
+        taskId: executingTask?.id,
         request: fullCreationRequest,
         task: payload.task,
         target: refSummary(reference),
         state: 'running',
         startedAt: turnRef.current.startedAt,
         stage: 'understanding',
-        followups: queueRef.current.map((x) => x.text),
+        followups: (L.session.tasks || [])
+          .filter((t) => t.state === 'queued' && t.id !== executingTask?.id)
+          .map((t) => t.request),
       };
       turnRef.current.work = work;
-      setSession((s) => ({ ...s, work }));
+      setSession((s) => ({
+        ...s,
+        work,
+        tasks: updateTask(s.tasks || [], executingTask?.id, {
+          state: 'running',
+          startedAt: Date.now(),
+          attempt: (executingTask?.attempt || 0) + 1,
+          baseVersionId: curVersion.id,
+          runId: id,
+          error: '',
+        }),
+      }));
       const beforeElements = store.elements.map((e) => ({
         ...e,
         styles: { ...e.styles },
@@ -1406,6 +1813,8 @@ export default function App() {
                 if (metric) metric.ttsRequestedAt = Date.now();
                 speakText(event.reply, {
                   language,
+                  afterQuestions: true,
+                  isCurrent: () => work.state !== 'cancelled',
                   onStart: (duration) => {
                     if (metric && !metric.firstAudioAt) {
                       metric.firstAudioAt = Date.now();
@@ -1463,7 +1872,7 @@ export default function App() {
                 live.current.call.active &&
                 !live.current.call.speakerMuted &&
                 !turnRef.current?.speechInterrupted;
-              if (targets.length)
+              if (targets.length && !discussionJobs.current.size)
                 tour.start(targets, {
                   reply: event.reply,
                   tone: 'point',
@@ -1472,6 +1881,7 @@ export default function App() {
               if (read && !earlyReply)
                 speakText(event.reply, {
                   language,
+                  isCurrent: () => work.state !== 'cancelled',
                   onStart: (d) => tour.syncToAudio(d),
                 });
             }
@@ -1488,6 +1898,7 @@ export default function App() {
           parent: curVersion,
           language,
           earlyReply,
+          taskId: executingTask?.id,
           beforeElements,
         });
         if (turnRef.current?.id === id && turnRef.current.work)
@@ -1516,6 +1927,35 @@ export default function App() {
                     error: outcome?.error || '',
                     finishedAt: Date.now(),
                   },
+                  tasks: ['none', 'point', 'tour'].includes(result.action)
+                    ? (s.tasks || []).filter((t) => t.id !== executingTask?.id)
+                    : updateTask(s.tasks || [], executingTask?.id, {
+                        state:
+                          result.action === 'clarify'
+                            ? 'needs_detail'
+                            : result.action === 'compare'
+                              ? 'needs_choice'
+                              : outcome?.outcome === 'failed'
+                                ? 'failed'
+                                : 'ready',
+                        kind:
+                          result.action === 'compare'
+                            ? 'compare'
+                            : executingTask?.kind,
+                        question:
+                          result.action === 'clarify'
+                            ? result.reply
+                            : result.action === 'compare'
+                              ? 'Choose A or B in the preview.'
+                              : '',
+                        error: outcome?.error || '',
+                        resultVersionId: outcome?.versionId || null,
+                        applied: outcome?.applied !== false,
+                        title: result.summary || executingTask?.title,
+                        finishedAt: Date.now(),
+                      }),
+                  queuePaused:
+                    outcome?.outcome === 'failed' ? true : s.queuePaused,
                 }
               : s,
           );
@@ -1532,6 +1972,12 @@ export default function App() {
                   error: e.message || 'The build failed.',
                   finishedAt: Date.now(),
                 },
+                tasks: updateTask(s.tasks || [], executingTask?.id, {
+                  state: 'failed',
+                  error: e.message || 'The build failed.',
+                  finishedAt: Date.now(),
+                }),
+                queuePaused: true,
               }
             : s,
         );
@@ -1568,6 +2014,60 @@ export default function App() {
   );
   runTurnRef.current = sendTurn;
 
+  useEffect(() => {
+    if (turnRef.current || turn.phase !== 'idle' || !bridge.ready) return;
+    const task = nextQueuedTask(
+      session.tasks || [],
+      session.queuePaused,
+      hasPageContent(current.html) || isCompanion,
+    );
+    if (!task) return;
+    const timer = setTimeout(() => {
+      const fresh = live.current.session.tasks?.find((t) => t.id === task.id);
+      if (
+        turnRef.current ||
+        live.current.project.id !== projectId ||
+        !fresh ||
+        fresh.state !== 'queued' ||
+        live.current.session.queuePaused ||
+        !store.getSnapshot().ready
+      )
+        return;
+      const target = task.target
+        ? store.elements.find((e) => e.id === task.target.id)
+        : null;
+      if (task.target && !target) {
+        patchTask(task.id, {
+          state: 'needs_detail',
+          question:
+            'The element you pointed at is no longer on this preview. Point to the right element and tell me which one, or remove this task.',
+        });
+        return;
+      }
+      runTurnRef.current?.(task.request, {
+        executeTaskId: task.id,
+        task: task.kind === 'create' ? 'create' : 'edit',
+        compare: task.kind === 'compare',
+        via: task.via || 'task',
+        reference: {
+          selection: target && task.target.locked ? target : null,
+          hover: target && !task.target.locked ? target : null,
+          trail: [],
+        },
+      });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [
+    session.tasks,
+    session.queuePaused,
+    bridge.ready,
+    turn.phase,
+    current.html,
+    isCompanion,
+    projectId,
+    store,
+  ]);
+
   const handleResultRef = useRef(null);
   async function handleResult(result, ctx) {
     return handleResultRef.current(result, ctx);
@@ -1581,6 +2081,7 @@ export default function App() {
       parent,
       language,
       earlyReply = '',
+      taskId,
       beforeElements = [],
     },
   ) => {
@@ -1612,6 +2113,7 @@ export default function App() {
         parent,
         beforeElements,
         language,
+        taskId,
         targetId: result.targets?.[0]?.id,
       });
       setCompareMode(false);
@@ -1699,6 +2201,7 @@ export default function App() {
       ? result.targets.filter((t) => t && typeof t === 'object').slice(0, 6)
       : [];
     let versionId = null;
+    let applied = live.current.current.id === parent.id;
     let editError = '';
     const generation = store.getSnapshot().generation;
 
@@ -1706,6 +2209,7 @@ export default function App() {
       if (projectAtStart === 'companion') {
         const v = {
           id: String(result.versionId || uid('v')),
+          taskId,
           html:
             typeof result.html === 'string' && /<html[\s>]/i.test(result.html)
               ? result.html.slice(0, 380000)
@@ -1725,14 +2229,15 @@ export default function App() {
             : [],
           provider: String(result.provider || 'Claude Code'),
         };
+        commitVersion(v, { activate: applied });
         versionId = v.id;
-        commitVersion(v);
         setPreviewNonce((n) => n + 1);
       } else if (typeof result.html === 'string' && result.html.trim()) {
         try {
           const html = prepareDocument(result.html, { sanitize: true });
           const v = {
             id: String(result.versionId || uid('v')),
+            taskId,
             html,
             summary: clip(result.summary || 'Design refinement', 80),
             intent: String(result.intent || ''),
@@ -1747,8 +2252,8 @@ export default function App() {
             sourceChanges: [],
             provider: String(result.provider || ''),
           };
+          commitVersion(v, { activate: applied });
           versionId = v.id;
-          commitVersion(v);
         } catch (e) {
           editError = `The generated page could not be used (${e.message}). Your current version is unchanged.`;
         }
@@ -1758,13 +2263,14 @@ export default function App() {
       }
     }
 
-    if (versionId) {
+    if (versionId && applied) {
       if (turnRef.current?.id === id) turnRef.current.stage = 'applying';
       setTurn((t) => ({ ...t, phase: 'applying' }));
       await store.waitForReady(generation, 6000);
     }
     if (turnRef.current?.id !== id) return;
 
+    if (versionId) applied = live.current.current.id === versionId;
     const elements = store.elements;
     const labelFor = (cid) => rawTargets.find((t) => t.id === cid)?.label;
     const wanted =
@@ -1779,9 +2285,10 @@ export default function App() {
         : action === 'point' || action === 'clarify'
           ? rawTargets
           : rawTargets.slice(0, 2);
-    const measured = versionId
-      ? changedTargets(beforeElements, elements, changes, language)
-      : [];
+    const measured =
+      versionId && applied
+        ? changedTargets(beforeElements, elements, changes, language)
+        : [];
     const targets = versionId
       ? measured.length
         ? measured
@@ -1789,14 +2296,28 @@ export default function App() {
             .filter((t) => t.id !== 'page')
             .slice(0, 4)
       : resolveTargets(wanted, elements).slice(0, 5);
+    const taskNumber = (live.current.session.tasks || []).find(
+      (t) => t.id === taskId,
+    )?.seq;
+    const completionLead = taskNumber
+      ? language === 'hinglish'
+        ? `Task ${taskNumber} ready है.`
+        : language === 'hi-IN'
+          ? `काम ${taskNumber} तैयार है।`
+          : `Task ${taskNumber} is ready.`
+      : spokenUI('complete', language);
     const completion = editError
       ? editError
-      : versionId
-        ? `${spokenUI('complete', language)} ${targets
-            .slice(0, 2)
-            .map((t) => t.description || t.label)
-            .join('. ')}`
-        : reply;
+      : versionId && !applied
+        ? language === 'hinglish'
+          ? 'Result अलग version में save है, क्योंकि बीच में page बदल गया था. Task से उसे review कर सकते हैं.'
+          : 'The result is saved as a separate version because the page changed while I was working. View it from the task list.'
+        : versionId
+          ? `${completionLead} ${targets
+              .slice(0, 2)
+              .map((t) => t.description || t.label)
+              .join('. ')}`
+          : reply;
     if (versionId)
       setSession((s) => ({
         ...s,
@@ -1819,6 +2340,7 @@ export default function App() {
       content: completion,
       at: Date.now(),
       action: editError ? 'none' : action,
+      taskId,
       targets: targets.map((t) => ({ id: t.id, label: clip(t.label, 80) })),
       versionId,
       provider: String(result?.provider || ''),
@@ -1837,14 +2359,21 @@ export default function App() {
         : action === 'edit' && versionId
           ? 'change'
           : 'point';
-    if (targets.length)
-      tour.start(targets, { reply: completion, tone, expectAudio: wantVoice });
+    if (targets.length && !wantVoice)
+      tour.start(targets, { reply: completion, tone, expectAudio: false });
     if (wantVoice && (versionId || completion !== earlyReply)) {
       // Speech runs outside the turn so the conversation is free while Ground talks (barge-in works).
       speakText(completion, {
         messageId: msg.id,
         language,
-        onStart: (d) => tour.syncToAudio(d),
+        kind: 'completion',
+        afterQuestions: true,
+        owner: { kind: 'task', id },
+        onStart: (d) => {
+          if (targets.length && applied)
+            tour.start(targets, { reply: completion, tone, expectAudio: true });
+          tour.syncToAudio(d);
+        },
       }).then((outcome) => {
         if (outcome !== 'ended' && outcome !== 'stopped')
           tour.audioUnavailable();
@@ -1853,6 +2382,8 @@ export default function App() {
     return {
       outcome: editError ? 'failed' : versionId ? 'ready' : 'answered',
       error: editError,
+      versionId,
+      applied,
     };
   };
 
@@ -1951,10 +2482,19 @@ export default function App() {
         for (const fn of levelListeners.current) fn(level);
       },
       onSpeechStart: (segmentId) => {
-        utterRefs.current.set(segmentId, captureReference());
+        utterRefs.current.set(segmentId, {
+          ...captureReference(),
+          interruptedVoice: player.playing || speechQueue.busy,
+        });
         player.setVolume(0.2);
       },
-      onSpeechConfirmed: () => {
+      onSpeechConfirmed: (segmentId) => {
+        if (
+          utterRefs.current.get(segmentId)?.interruptedVoice ||
+          player.playing ||
+          speechQueue.busy
+        )
+          lastVoiceCutAt.current = Date.now();
         if (turnRef.current) turnRef.current.speechInterrupted = true;
         if (walkRef.current) stopWalkthrough();
         speechQueue.cancel();
@@ -2112,10 +2652,30 @@ export default function App() {
     (id) => {
       const next = customProjects.find((p) => p.id === id) || projectById(id);
       if (!next || id === live.current.project.id) return;
+      const leaving = live.current.session,
+        active = turnRef.current;
       interrupt({ silent: true });
       setDemo(null);
       setComparison(null);
-      saveSession(live.current.session);
+      saveSession(
+        active
+          ? {
+              ...leaving,
+              queuePaused: true,
+              work: leaving.work
+                ? {
+                    ...leaving.work,
+                    state: 'cancelled',
+                    finishedAt: Date.now(),
+                  }
+                : null,
+              tasks: updateTask(leaving.tasks || [], active.work?.taskId, {
+                state: 'cancelled',
+                finishedAt: Date.now(),
+              }),
+            }
+          : leaving,
+      );
       store.reset();
       store.trail.length = 0;
       setSession(loadOrCreate(next));
@@ -2130,8 +2690,24 @@ export default function App() {
     const clean = html.trim()
       ? prepareDocument(html, { sanitize: true })
       : blankHTML(name || 'Untitled page');
+    const leaving = live.current.session,
+      active = turnRef.current;
     interrupt({ silent: true });
-    saveSession(live.current.session);
+    saveSession(
+      active
+        ? {
+            ...leaving,
+            queuePaused: true,
+            work: leaving.work
+              ? { ...leaving.work, state: 'cancelled', finishedAt: Date.now() }
+              : null,
+            tasks: updateTask(leaving.tasks || [], active.work?.taskId, {
+              state: 'cancelled',
+              finishedAt: Date.now(),
+            }),
+          }
+        : leaving,
+    );
     setComparison(null);
     setDemo(null);
     store.reset();
@@ -2269,10 +2845,16 @@ export default function App() {
     const choice = c.variants[index];
     if (!choice) return;
     setComparison(null);
-    interrupt({ silent: true });
+    interrupt({ silent: true, scope: 'work' });
+    setTurn({
+      phase: 'applying',
+      startedAt: Date.now(),
+      label: 'Loading your chosen direction',
+    });
     const generation = store.getSnapshot().generation;
     const v = {
       id: uid('v'),
+      taskId: c.taskId,
       html: choice.html,
       summary: choice.name,
       intent: choice.intent,
@@ -2284,15 +2866,28 @@ export default function App() {
       sourceChanges: [],
       provider: 'Ground',
     };
-    commitVersion(v);
-    await store.waitForReady(generation, 6000);
-    if (live.current.current.id !== v.id) return;
-    const targets = changedTargets(
-      c.beforeElements,
-      store.elements,
-      choice.changes || [],
-      c.language,
-    );
+    const activate = live.current.current.id === c.parent.id;
+    commitVersion(v, { activate });
+    patchTask(c.taskId, {
+      state: 'ready',
+      resultVersionId: v.id,
+      applied: activate,
+      title: choice.name,
+      finishedAt: Date.now(),
+    });
+    if (activate) await store.waitForReady(generation, 6000);
+    if (activate && live.current.current.id !== v.id) {
+      setTurn({ phase: 'idle', startedAt: 0 });
+      return;
+    }
+    const targets = activate
+      ? changedTargets(
+          c.beforeElements,
+          store.elements,
+          choice.changes || [],
+          c.language,
+        )
+      : [];
     setSession((s) => ({
       ...s,
       versions: s.versions.map((x) =>
@@ -2308,10 +2903,14 @@ export default function App() {
       ),
     }));
     if (selectedId) sendToPreview({ type: 'cg:select', id: selectedId });
-    const content = `${spokenUI('chosen', c.language, { name: choice.name })} ${targets
-      .slice(0, 2)
-      .map((t) => t.description)
-      .join('. ')}`;
+    const content = !activate
+      ? c.language === 'hinglish'
+        ? 'आपका चुना option अलग version में save है. Task से review कर सकते हैं.'
+        : 'Your choice is saved as a separate version. View it from the task list.'
+      : `${spokenUI('chosen', c.language, { name: choice.name })} ${targets
+          .slice(0, 2)
+          .map((t) => t.description)
+          .join('. ')}`;
     appendMessages({
       id: uid('m'),
       role: 'assistant',
@@ -2331,8 +2930,68 @@ export default function App() {
     if (live.current.call.active && !live.current.call.speakerMuted)
       speakText(content, {
         language: c.language,
+        afterQuestions: true,
         onStart: (d) => tour.syncToAudio(d),
       });
+    setTurn({ phase: 'idle', startedAt: 0 });
+  };
+
+  taskActionRef.current = (task, action) => {
+    if (action === 'continue') {
+      const L = live.current,
+        first = (L.session.tasks || []).find((t) => t.state === 'queued');
+      if (!hasPageContent(L.current.html) && first && first.kind !== 'create') {
+        toast('Retry the page build before continuing its changes.');
+        return;
+      }
+      setSession((s) => ({ ...s, queuePaused: false }));
+      return;
+    }
+    if (action === 'cancel') {
+      if (turnRef.current?.work?.taskId === task.id)
+        interrupt({ silent: true, scope: 'work' });
+      else {
+        patchTask(task.id, { state: 'cancelled', finishedAt: Date.now() });
+        if (live.current.comparison?.taskId === task.id) setComparison(null);
+        setSession((s) =>
+          s.work?.taskId === task.id
+            ? {
+                ...s,
+                work: {
+                  ...s.work,
+                  state: 'cancelled',
+                  awaitingClarification: false,
+                  finishedAt: Date.now(),
+                },
+              }
+            : s,
+        );
+      }
+      return;
+    }
+    if (action === 'retry') {
+      if (!['failed', 'interrupted', 'cancelled'].includes(task.state)) return;
+      patchTask(task.id, { state: 'queued', error: '', question: '' });
+      setSession((s) => ({ ...s, queuePaused: false }));
+      return;
+    }
+    if (action === 'view' && task.resultVersionId) {
+      if (!turnRef.current) restore(task.resultVersionId);
+      else
+        toast('The result is saved. View it after the current task finishes.');
+    }
+    if (action === 'answer') {
+      if (
+        task.state === 'needs_choice' &&
+        live.current.comparison?.taskId === task.id
+      )
+        return;
+      const content =
+        task.question || 'Tell me the missing detail on the call.';
+      if (live.current.call.active)
+        speakText(content, { language: live.current.voiceProfile.style });
+      else startCall();
+    }
   };
 
   const resetProject = useCallback(() => {
@@ -2440,7 +3099,7 @@ export default function App() {
   }, [companionSrc]);
   useEffect(() => {
     store.set({ ready: false });
-  }, [srcDoc, companionSrc, previewNonce, store]);
+  }, [srcDoc, companionSrc, previewNonce, current.id, store]);
 
   /* ---------- selection tools ---------- */
   const selectElement = useCallback(
@@ -2582,7 +3241,12 @@ export default function App() {
   /* ---------- keyboard ---------- */
   handleKeyRef.current = ({ key, meta, shift, fromPreview }) => {
     if (key === 'Escape') {
-      if (live.current.turn.phase !== 'idle' || player.playing) interrupt();
+      if (
+        live.current.turn.phase !== 'idle' ||
+        player.playing ||
+        discussionJobs.current.size
+      )
+        stopForeground();
       else if (store.getSnapshot().selection && !fromPreview)
         selectElement(null);
       return true;
@@ -2670,6 +3334,22 @@ export default function App() {
       />
 
       <main className="studio">
+        <TaskRail
+          key={project.id}
+          tasks={session.tasks || []}
+          paused={!!session.queuePaused}
+          busy={busy}
+          turn={turn}
+          versions={session.versions}
+          onAction={(task, action) => taskActionRef.current?.(task, action)}
+          canContinue={
+            hasPageContent(current.html) ||
+            isCompanion ||
+            (session.tasks || []).find((t) => t.state === 'queued')?.kind ===
+              'create'
+          }
+          onContinue={() => taskActionRef.current?.(null, 'continue')}
+        />
         <section className="stage-col" aria-label="Shared preview">
           <div className="workspace-tools">
             <button
@@ -2737,10 +3417,12 @@ export default function App() {
               Publish
             </button>
           </div>
-          {!busy && session.work?.awaitingClarification && (
-            <PendingClarification work={session.work} />
-          )}
-          {!busy && recoverable && (
+          {!busy &&
+            !hasPageContent(current.html) &&
+            session.work?.awaitingClarification && (
+              <PendingClarification work={session.work} />
+            )}
+          {!busy && !hasPageContent(current.html) && recoverable && (
             <InterruptedWork work={recoverable} onResume={resumeWork} />
           )}
           {walkthrough && (
@@ -2785,7 +3467,7 @@ export default function App() {
             iframeRef={iframeRef}
             srcDoc={srcDoc}
             companionSrc={companionSrc}
-            previewNonce={previewNonce}
+            previewNonce={`${current.id}:${previewNonce}`}
             isCompanion={isCompanion}
             companion={companion}
             onOpenSetup={() => setPanel('setup')}
@@ -2829,12 +3511,21 @@ export default function App() {
               />
             )}
           </PreviewStage>
-          {busy && <Processing turn={turn} onStop={() => interrupt()} />}
+          {busy && (
+            <Processing
+              turn={turn}
+              onStop={() => interrupt({ scope: 'work' })}
+            />
+          )}
           {comparison && (
             <CompareView
               comparison={comparison}
               onChoose={(index, id) => chooseComparisonRef.current?.(index, id)}
               onCancel={() => {
+                patchTask(comparison.taskId, {
+                  state: 'cancelled',
+                  finishedAt: Date.now(),
+                });
                 setComparison(null);
                 tour.cancel();
                 toast('Original page kept.');
@@ -2847,7 +3538,13 @@ export default function App() {
           call={call}
           controls={callControls}
           handsFree={settings.handsFree}
-          queued={queued}
+          queued={
+            (session.tasks || [])
+              .filter((t) => t.state === 'queued')
+              .map((t) => clip(t.title, 60))
+              .join(' · ') || null
+          }
+          discussion={discussion}
           turn={turn}
           transcribing={transcribing > 0}
           speaking={speaking}
@@ -2861,7 +3558,7 @@ export default function App() {
           onTranscript={() => setPanel('transcript')}
           onListen={listen}
           onRetry={(m) => sendTurn(m.retry.text, { via: m.retry.via })}
-          onInterrupt={() => interrupt()}
+          onInterrupt={stopForeground}
           onClearSelection={() => selectElement(null)}
           onSelectRef={(id) => selectElement(id, true)}
           onPointTargets={(targets, tone) => pointAt(targets, tone)}
@@ -2889,7 +3586,7 @@ export default function App() {
               companion={companion}
               onSend={(text) => sendTurn(text, { via: 'text' })}
               onRetry={(m) => sendTurn(m.retry.text, { via: m.retry.via })}
-              onInterrupt={() => interrupt()}
+              onInterrupt={stopForeground}
               onListen={listen}
               voiceAvailable={voiceAvailable}
               onSelectRef={(id) => selectElement(id, true)}

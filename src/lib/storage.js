@@ -1,3 +1,4 @@
+import { cleanTasks } from './tasks.js';
 import { cleanWork } from './workConversation.js';
 // Local persistence with strict validation. Anything malformed is dropped rather than trusted.
 
@@ -113,6 +114,7 @@ function cleanVersion(v) {
   if (v.html && !/<html[\s>]/i.test(v.html)) return null;
   return {
     id: v.id,
+    taskId: str(v.taskId, 120) ? v.taskId : null,
     html: v.html,
     summary: str(v.summary, 200) ? v.summary : 'Version',
     intent: str(v.intent, 1200) ? v.intent : '',
@@ -148,6 +150,8 @@ function cleanMessage(m) {
       : undefined,
     targets: cleanTargets(m.targets),
     versionId: str(m.versionId, 120) ? m.versionId : null,
+    taskId: str(m.taskId, 120) ? m.taskId : null,
+    lane: m.lane === 'conversation' ? 'conversation' : 'work',
     provider: str(m.provider, 80) ? m.provider : '',
     language: /^(?:hinglish|(?:en|hi|bn|gu|kn|ml|mr|od|pa|ta|te)-IN)$/.test(
       m.language || '',
@@ -183,8 +187,16 @@ export function validateSession(raw, projectId) {
     str(raw.currentVersionId, 120) && ids.has(raw.currentVersionId)
       ? raw.currentVersionId
       : unique[unique.length - 1].id;
+  const work = cleanWork(raw.work);
+  const tasks = cleanTasks(raw.tasks, unique, work);
   return {
     projectId,
+    tasks,
+    queuePaused:
+      !!raw.queuePaused ||
+      tasks.some((t) => t.state === 'interrupted') ||
+      (!Array.isArray(raw.tasks) &&
+        ['running', 'failed', 'cancelled'].includes(work?.state)),
     voiceStyle: /^(?:hinglish|(?:en|hi|bn|gu|kn|ml|mr|od|pa|ta|te)-IN)$/.test(
       raw.voiceStyle || '',
     )
@@ -192,7 +204,7 @@ export function validateSession(raw, projectId) {
       : undefined,
     createdAt: num(raw.createdAt) ? raw.createdAt : Date.now(),
     updatedAt: num(raw.updatedAt) ? raw.updatedAt : Date.now(),
-    work: cleanWork(raw.work),
+    work,
     versions: unique,
     messages,
     currentVersionId,

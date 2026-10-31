@@ -46,6 +46,9 @@ test('human status and waiting phrases are separate from edits, cancellation and
     'cancel this build',
     'रुको',
     'nahi, ruko.',
+    'never mind',
+    'rehne do',
+    'chhodo',
   ])
     assert.equal(classifyWorkUtterance(text), 'cancel', text);
   for (const text of [

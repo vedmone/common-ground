@@ -1,6 +1,7 @@
 import express from 'express';
 import {createServer as createViteServer} from 'vite';
 import chat from '../api/chat.js';
+import discuss from '../api/discuss.js';
 import speak from '../api/speak.js';
 import transcribe from '../api/transcribe.js';
 import health from '../api/health.js';
@@ -12,7 +13,7 @@ const app=express();
 app.post('/api/transcribe',transcribe);
 app.post('/api/media',media);
 app.use(express.json({limit:'650kb'}));
-app.all('/api/chat',chat);app.all('/api/speak',speak);app.get('/api/health',health);
+app.all('/api/discuss',discuss);app.all('/api/chat',chat);app.all('/api/speak',speak);app.get('/api/health',health);
 app.all('/api/publish',publish);app.get('/project/:id',(req,res)=>site({query:{id:req.params.id}},res));
 const vite=await createViteServer({server:{middlewareMode:true},appType:'spa'});
 app.use(vite.middlewares);

@@ -7,6 +7,7 @@ import './styles/panels.css';
 import './styles/welcome.css';
 import './styles/voice-room.css';
 import './styles/editor.css';
+import './styles/tasks.css';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

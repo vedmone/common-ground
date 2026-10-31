@@ -5,7 +5,7 @@ import { Window } from 'happy-dom';
 import { createServer } from 'vite';
 
 test(
-  'voice status questions and waiting acknowledgments keep the original page build alive',
+  'voice tasks keep running through questions, stops, choices, retries and changing the visible version',
   { timeout: 30000 },
   async () => {
     const window = new Window({
@@ -89,11 +89,17 @@ test(
     window.localStorage.setItem('commonground:images', JSON.stringify([asset]));
     const page =
       '<!doctype html><html><head><title>Clay House</title></head><body><nav data-cg-id="nav">Clay House · Workshops</nav><main data-cg-id="main"><h1 data-cg-id="hero-heading">Made slowly, by hand.</h1><section data-cg-id="workshops"><h2 data-cg-id="workshop-heading">Our workshops</h2><p data-cg-id="copy">Meet the clay and make something yours.</p><button data-cg-id="cta">Book a workshop</button></section></main><footer data-cg-id="footer">Visit Jaipur</footer></body></html>';
+    const questionCalls = [],
+      pendingQuestions = [];
     const calls = [],
       speech = [],
-      builds = [];
+      builds = [],
+      delayedEdits = [];
     let transcript = '',
-      voiceInstance;
+      voiceInstance,
+      pauseReady = false,
+      holdSpeech = false;
+    const heldSpeech = [];
     globalThis.fetch = async (url, options = {}) => {
       if (String(url).endsWith('/api/health'))
         return Response.json({
@@ -102,11 +108,38 @@ test(
           voice: true,
           provider: 'Fixture',
         });
+      if (String(url).endsWith('/api/discuss')) {
+        const body = JSON.parse(options.body);
+        questionCalls.push({ body, signal: options.signal });
+        if (body.messages.at(-1).content === 'Why this color?')
+          return new Promise((resolve) =>
+            pendingQuestions.push(() =>
+              resolve(
+                Response.json({
+                  route: 'answer',
+                  reply: 'Terracotta gives the studio a warm, handmade feel.',
+                  voiceStyle: 'en-IN',
+                }),
+              ),
+            ),
+          );
+        return Response.json({
+          route: 'answer',
+          reply: 'इस page में serif heading एक handmade feel देता है.',
+          voiceStyle: 'hinglish',
+        });
+      }
       if (String(url).endsWith('/api/transcribe'))
         return Response.json({ transcript, language_code: 'hi-IN' });
       const body = options.body ? JSON.parse(options.body) : {};
       if (String(url).endsWith('/api/speak')) {
         speech.push(body.text);
+        if (holdSpeech)
+          return new Promise((resolve) =>
+            heldSpeech.push(() =>
+              resolve(Response.json({ audio: 'AAAA', mimeType: 'audio/mpeg' })),
+            ),
+          );
         return Response.json({ audio: 'AAAA', mimeType: 'audio/mpeg' });
       }
       if (String(url).endsWith('/api/chat')) {
@@ -188,6 +221,57 @@ test(
             headers: { 'content-type': 'application/x-ndjson' },
           });
         }
+        if (body.messages.at(-1).content === 'Make the heading blue slowly.') {
+          return new Promise((resolve) =>
+            delayedEdits.push(() =>
+              resolve(
+                Response.json({
+                  action: 'edit',
+                  reply: 'Heading is blue.',
+                  summary: 'Blue heading',
+                  html: body.context.html.replace(
+                    '<h1 ',
+                    '<h1 style="color:blue" ',
+                  ),
+                  changes: [
+                    {
+                      id: 'hero-heading',
+                      description: 'Made the heading blue',
+                    },
+                  ],
+                }),
+              ),
+            ),
+          );
+        }
+        if (
+          body.compare ||
+          body.messages.at(-1).content.includes('two directions')
+        )
+          return Response.json({
+            action: 'compare',
+            reply: 'Choose a direction.',
+            variants: [
+              {
+                id: 'a',
+                name: 'Warm',
+                html: body.context.html.replace(
+                  '<h1 ',
+                  '<h1 style="color:red" ',
+                ),
+                changes: [],
+              },
+              {
+                id: 'b',
+                name: 'Cool',
+                html: body.context.html.replace(
+                  '<h1 ',
+                  '<h1 style="color:blue" ',
+                ),
+                changes: [],
+              },
+            ],
+          });
         let updated = body.context.html;
         if (body.messages.at(-1).content.includes('A real workshop page'))
           updated = updated.replace(
@@ -203,6 +287,7 @@ test(
           updated = updated.replace('<h1 ', '<h1 style="color:green" ');
         return Response.json({
           action: 'edit',
+          versionId: 'shared-fixture-version',
           reply: 'Applying your queued change.',
           html: updated,
           summary: 'Queued change',
@@ -245,6 +330,7 @@ test(
       const { default: App } = await server.ssrLoadModule('/src/App.jsx');
       const seen = new WeakMap();
       const announce = () => {
+        if (pauseReady) return;
         for (const frame of document.querySelectorAll('iframe')) {
           const html = frame.getAttribute('srcdoc');
           if (!html || seen.get(frame) === html || !frame.contentWindow)
@@ -319,7 +405,8 @@ test(
         const count = speech.length;
         transcript = text;
         await act(async () => {
-          voiceInstance.h.onSpeechConfirmed?.();
+          voiceInstance.h.onSpeechStart?.('fixture');
+          voiceInstance.h.onSpeechConfirmed?.('fixture');
           voiceInstance.h.onUtterance(new Blob(['fixture']), {
             segmentId: 'fixture',
             filename: 'speech.webm',
@@ -352,6 +439,15 @@ test(
       await say("Okay, I'll wait.");
       assert.equal(builds[0].aborted, false);
       assert.equal(calls.length, 1);
+      await say('Which font are you using?');
+      assert.equal(questionCalls.length, 1);
+      assert.equal(
+        calls.length,
+        1,
+        'a separate question never enters the writer',
+      );
+      assert.equal(builds[0].aborted, false);
+      assert.equal(document.querySelectorAll('.task-card').length, 1);
       await say('Make the headline read A real workshop page.');
       await say('Add a footer note called Open every Sunday.');
       assert.equal(
@@ -369,6 +465,11 @@ test(
       );
       await waitFor(() => assert.ok(source().includes('Open every Sunday')));
       assert.equal(calls.length, 3);
+      assert.equal(
+        document.querySelectorAll('.task-card').length,
+        3,
+        'each work request has one task card',
+      );
       assert.ok(calls[1].context.html.includes('Made slowly, by hand.'));
       assert.ok(calls[2].context.html.includes('A real workshop page'));
       assert.ok(
@@ -379,6 +480,34 @@ test(
               c.task === 'edit' && !c.context.html.includes('A FRESH CANVAS'),
           ),
       );
+      await waitFor(() =>
+        assert.ok(
+          [...document.querySelectorAll('.task-card')].every(
+            (c) => c.dataset.taskState === 'ready',
+          ),
+        ),
+      );
+      const firstCard = [...document.querySelectorAll('.task-card')].find(
+        (c) => c.querySelector('.task-number').textContent.trim() === '01',
+      );
+      fireEvent.click(firstCard.querySelector('.task-select'));
+      fireEvent.click(
+        ui.getByRole('button', { name: 'View result for task 1' }),
+      );
+      await waitFor(() =>
+        assert.ok(
+          source().includes('Made slowly, by hand.') &&
+            !source().includes('A real workshop page'),
+        ),
+      );
+      const lastCard = [...document.querySelectorAll('.task-card')].find(
+        (c) => c.querySelector('.task-number').textContent.trim() === '03',
+      );
+      fireEvent.click(lastCard.querySelector('.task-select'));
+      fireEvent.click(
+        ui.getByRole('button', { name: 'View result for task 3' }),
+      );
+      await waitFor(() => assert.ok(source().includes('Open every Sunday')));
       await say("Okay, I'll wait.");
       assert.equal(
         calls.length,
@@ -401,7 +530,54 @@ test(
         'Build a complete pottery studio landing page that can be resumed.';
       newBuild(originalBrief);
       await waitFor(() => assert.equal(builds.length, 2));
-      await say('stop building', false);
+      transcript = 'Why this color?';
+      await act(async () => {
+        voiceInstance.h.onSpeechConfirmed?.();
+        voiceInstance.h.onUtterance(new Blob(['fixture']), {
+          segmentId: 'question-2',
+          filename: 'speech.webm',
+          endedAt: Date.now(),
+        });
+      });
+      await waitFor(() => assert.equal(pendingQuestions.length, 1));
+      await say('Make the headline green.');
+      assert.equal(questionCalls.at(-1).signal.aborted, false);
+      await act(async () => pendingQuestions[0]());
+      await waitFor(() =>
+        assert.ok(
+          speech.some((t) => t.includes('Terracotta gives')),
+          'a new work request must not silence the pending answer',
+        ),
+      );
+      await say('Why this color?', false);
+      await waitFor(() => assert.equal(pendingQuestions.length, 2));
+      const stopSignal = questionCalls.at(-1).signal;
+      fireEvent.click(ui.getByRole('button', { name: 'Stop Ground' }));
+      await waitFor(() => assert.ok(stopSignal.aborted));
+      assert.equal(
+        builds[1].aborted,
+        false,
+        'Stop Ground stops the independent answer, not the page build',
+      );
+      await act(async () => pendingQuestions[1]());
+      await say('Why this color?', false);
+      await waitFor(() => assert.equal(pendingQuestions.length, 3));
+      const questionSignal = questionCalls.at(-1).signal;
+      fireEvent.click(ui.getByRole('button', { name: 'Cancel task 1' }));
+      assert.equal(
+        questionSignal.aborted,
+        false,
+        'cancelling work must not cancel an independent answer',
+      );
+      await act(async () => pendingQuestions[2]());
+      await waitFor(() =>
+        assert.ok(
+          document.body.textContent.includes(
+            'Terracotta gives the studio a warm, handmade feel.',
+          ),
+        ),
+      );
+
       await waitFor(() => assert.equal(builds[1].aborted, true));
       await waitFor(() =>
         assert.ok(ui.getByRole('button', { name: 'Resume build' })),
@@ -482,6 +658,152 @@ test(
       );
       assert.ok(source().includes('Made slowly, by hand.'));
       assert.ok(!ui.queryByRole('status', { name: 'Waiting for details' }));
+      await say('Give this button two directions.', false);
+      await waitFor(() =>
+        assert.ok(
+          document.querySelector('.task-card[data-task-state="needs_choice"]'),
+        ),
+      );
+      const comparisonCount = calls.length;
+      await say('Add a footer note called Open every Sunday.', false);
+      assert.equal(
+        calls.length,
+        comparisonCount,
+        'queued work waits for the design choice',
+      );
+      assert.ok(
+        document.querySelector('iframe[title*="Warm"]'),
+        'new work leaves comparison options visible',
+      );
+      const waitingCard = document.querySelector(
+        '.task-card[data-task-state="needs_choice"]',
+      );
+      if (!waitingCard.classList.contains('is-open'))
+        fireEvent.click(waitingCard.querySelector('.task-select'));
+      fireEvent.click(
+        waitingCard.querySelector('button[aria-label^="Remove task"]'),
+      );
+      await waitFor(() => assert.ok(calls.length > comparisonCount));
+      await waitFor(() => assert.ok(source().includes('Open every Sunday')));
+      await waitFor(() =>
+        assert.ok(
+          !document.querySelector('.task-card[data-task-state="running"]'),
+        ),
+      );
+      await say('Make the heading blue slowly.', false);
+      await waitFor(() => assert.equal(delayedEdits.length, 1));
+      const beforeKeep = calls.length;
+      await say('Keep this version.');
+      assert.equal(
+        calls.length,
+        beforeKeep,
+        'keep affects the visible version immediately, not a future queued result',
+      );
+      // Keyboard undo changes the visible base while the pending edit is still being generated.
+      fireEvent.keyDown(window, { key: 'z', metaKey: true });
+      await waitFor(() => assert.ok(!source().includes('Open every Sunday')));
+      await act(async () => delayedEdits[0]());
+      await waitFor(() =>
+        assert.ok(document.body.textContent.includes('Ready to view')),
+      );
+      assert.ok(
+        !source().includes('color:blue'),
+        'an edit based on a different version cannot replace the visible page',
+      );
+      await say('Give this button two directions.', false);
+      await waitFor(() => assert.ok(ui.getByRole('button', { name: 'Use B' })));
+      await say('Why this color?', false);
+      await waitFor(() => assert.equal(pendingQuestions.length, 4));
+      const choiceQuestion = questionCalls.at(-1).signal;
+      await say('Add a footer note called Open every Sunday.', false);
+      const callsBeforeChoice = calls.length;
+      fireEvent.click(ui.getByRole('button', { name: 'Use B' }));
+      assert.equal(
+        choiceQuestion.aborted,
+        false,
+        'choosing a variant preserves the independent answer',
+      );
+      await waitFor(() => assert.ok(calls.length > callsBeforeChoice));
+      assert.ok(
+        calls.at(-1).context.html.includes('color:blue'),
+        'the next task starts from the chosen direction',
+      );
+      await act(async () => pendingQuestions[3]());
+      await waitFor(() =>
+        assert.ok(
+          !document.querySelector('.task-card[data-task-state="running"]'),
+        ),
+      );
+      pauseReady = true;
+      fireEvent.keyDown(window, { key: 'z', metaKey: true });
+      await say('Make the headline green.', false);
+      const beforeReadiness = calls.length;
+      await act(async () => new Promise((r) => setTimeout(r, 120)));
+      assert.equal(
+        calls.length,
+        beforeReadiness,
+        'a queued task must wait for the current preview element inventory',
+      );
+      pauseReady = false;
+      await act(async () => announce());
+      await waitFor(() => assert.equal(calls.length, beforeReadiness + 1));
+      await waitFor(() =>
+        assert.ok(
+          !document.querySelector('.task-card[data-task-state="running"]'),
+        ),
+      );
+      const beforeTour = calls.length,
+        speechBeforeTour = speech.length;
+      await say('Give me a tour.', false);
+      await waitFor(() => assert.ok(speech.length > speechBeforeTour));
+      assert.equal(
+        calls.length,
+        beforeTour,
+        'a voice tour does not enter the edit queue',
+      );
+      await say('Give this button two directions.', false);
+      await waitFor(() => assert.ok(ui.getByRole('button', { name: 'Use B' })));
+      await say('Why this color?', false);
+      await waitFor(() => assert.equal(pendingQuestions.length, 5));
+      holdSpeech = true;
+      await act(async () => pendingQuestions[4]());
+      await waitFor(() => assert.ok(heldSpeech.length));
+      await say('stop', false);
+      assert.ok(
+        ui.getByRole('button', { name: 'Use B' }),
+        'spoken stop after barge-in stops voice without throwing away the comparison',
+      );
+      assert.ok(
+        document.querySelector('.task-card[data-task-state="needs_choice"]'),
+      );
+      holdSpeech = false;
+      await act(async () => heldSpeech.forEach((resolve) => resolve()));
+      await say('Cancel this build.', false);
+      await waitFor(() =>
+        assert.ok(!ui.queryByRole('button', { name: 'Use B' })),
+      );
+      const countBeforeDetail = builds.length;
+      newBuild('Create a page that will need a detail.');
+      await waitFor(() => assert.equal(builds.length, countBeforeDetail + 1));
+      await act(async () => builds.at(-1).clarify());
+      await waitFor(() =>
+        assert.ok(
+          document.querySelector('.task-card[data-task-state="needs_detail"]'),
+        ),
+      );
+      const beforeNeverMind = calls.length;
+      await say('never mind', false);
+      await waitFor(() =>
+        assert.ok(
+          !document.querySelector('.task-card[data-task-state="needs_detail"]'),
+        ),
+      );
+      await act(async () => new Promise((r) => setTimeout(r, 120)));
+      assert.equal(
+        calls.length,
+        beforeNeverMind,
+        'never mind cancels the waiting task instead of becoming creation details',
+      );
     } catch (error) {
       console.log(
         JSON.stringify({

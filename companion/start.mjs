@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {chat,speak,transcribe,validateChat,modelJSON,shapeResult,GROUND_SYSTEM,AppError,errorResponse,cleanHTML} from '../server/core.mjs';
 import {serveChat} from '../server/stream.mjs';
+import discussHandler from '../api/discuss.js';
 import {conversationLanguage,languageGuidance} from '../src/lib/conversationLanguage.js';
 import media from '../api/media.js';
 import publish from '../api/publish.js';
@@ -112,6 +113,7 @@ async function localChat(body){
 }
 
 app.post('/chat',check,async(req,res)=>{res.on('close',()=>{if(!res.writableEnded){interrupted=true;activeChild?.kill('SIGTERM');}});try{res.json(await localChat(req.body));}catch(e){if(!res.destroyed)errorResponse(res,e);}});
+app.post('/api/discuss',check,discussHandler);
 app.post('/api/chat',check,async(req,res)=>{try{await serveChat(req,res,chat);}catch(e){errorResponse(res,e);}});
 app.post('/interrupt',check,(req,res)=>{interrupted=true;if(activeChild)activeChild.kill('SIGTERM');res.json({ok:true,interrupted:true});});
 app.post('/undo',check,async(req,res)=>{

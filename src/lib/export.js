@@ -20,6 +20,7 @@ export function exportJSON(session, project) {
       format: 'common-ground-session@1',
       exportedAt: new Date().toISOString(),
       voiceMetrics: session.voiceMetrics || [],
+      tasks: session.tasks || [],
       project: { id: project.id, name: project.name },
       transcript: session.messages.map((m) => ({
         role:
@@ -30,6 +31,8 @@ export function exportJSON(session, project) {
               : 'Note',
         at: new Date(m.at).toISOString(),
         via: m.via,
+        taskId: m.taskId,
+        lane: m.lane,
         text: m.content,
         scripted: m.scripted || undefined,
         reference: m.ref || undefined,

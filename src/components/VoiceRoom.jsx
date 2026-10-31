@@ -64,9 +64,10 @@ function MicBars({ subscribe, active }) {
 
 /* ---------- participants ---------- */
 
-function groundState({ call, turn, transcribing, speaking, voiceAvailable, healthStatus }) {
+function groundState({ call, turn, transcribing, speaking, voiceAvailable, healthStatus, discussion }) {
   if (call.connecting) return { key: 'connecting', label: 'Joining the call…' };
   if (speaking) return { key: 'speaking', label: 'Speaking' };
+  if (discussion?.pending) return {key:'thinking',label:turn.phase!=='idle'?'Answering your question · work continues':'Answering your question'};
   if (turn.phase === 'applying') return { key: 'thinking', label: 'Applying the change to the page' };
   if (turn.phase !== 'idle') return { key: 'thinking', label: turn.label || 'Thinking it through' };
   if (transcribing) return { key: 'listening', label: 'Listening closely' };
@@ -294,6 +295,7 @@ export default function VoiceRoom({
   controls,
   handsFree,
   queued,
+  discussion,
   turn,
   transcribing,
   speaking,
@@ -313,7 +315,7 @@ export default function VoiceRoom({
   onPointTargets,
 }) {
   const thinking = turn.phase !== 'idle';
-  const gState = groundState({ call, turn, transcribing, speaking, voiceAvailable, healthStatus: health.status });
+  const gState = groundState({ call, turn, transcribing, speaking, voiceAvailable, healthStatus: health.status, discussion });
   const reference = bridge.selection || bridge.hover;
   const language = detectedLanguage ? LANGUAGE_NAMES[detectedLanguage] || detectedLanguage : '';
   const live = call.active;
@@ -344,6 +346,7 @@ export default function VoiceRoom({
         </button>
       </header>
 
+      {discussion?.pending>0&&<div className="discussion-status" role="status">Answering your question{thinking?' · your task keeps running':''}</div>}
       <div className="room-people">
         <GroundTile state={gState} pointing={pointing} />
         <SelfView call={call} handsFree={handsFree} controls={controls} reference={reference} locked={!!bridge.selection} onClearSelection={onClearSelection} />
@@ -369,7 +372,7 @@ export default function VoiceRoom({
         available={voiceAvailable}
         healthStatus={health.status}
         transcribing={transcribing}
-        thinking={thinking}
+        thinking={thinking || !!discussion?.pending}
         speaking={speaking}
         queued={queued}
         onInterrupt={onInterrupt}
