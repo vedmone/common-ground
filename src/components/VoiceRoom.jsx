@@ -66,9 +66,9 @@ function MicBars({ subscribe, active }) {
 
 function groundState({ call, turn, transcribing, speaking, voiceAvailable, healthStatus }) {
   if (call.connecting) return { key: 'connecting', label: 'Joining the call…' };
+  if (speaking) return { key: 'speaking', label: 'Speaking' };
   if (turn.phase === 'applying') return { key: 'thinking', label: 'Applying the change to the page' };
   if (turn.phase !== 'idle') return { key: 'thinking', label: turn.label || 'Thinking it through' };
-  if (speaking) return { key: 'speaking', label: 'Speaking' };
   if (transcribing) return { key: 'listening', label: 'Listening closely' };
   if (call.active) return { key: 'listening', label: call.speakerMuted ? 'Listening · voice off, captions on' : 'Listening' };
   if (!voiceAvailable) return { key: 'away', label: healthStatus === 'checking' ? 'Connecting…' : 'Voice unavailable' };
