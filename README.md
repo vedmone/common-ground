@@ -9,7 +9,8 @@ Common Ground binds a conversation to the interface being discussed. Your cursor
 ## What works
 
 - Create named HTML landing pages from a blank canvas or an AI brief; edit or import HTML directly.
-- Streaming replies and real build stages, with early spoken intent and short updates during longer edits.
+- Streaming replies and real build stages, with early spoken intent and short updates during longer edits. Status questions such as “kitna time lagega?” and “okay, I’ll wait” leave generation running.
+- Follow-up edits wait for the current page and run in order. Explicit cancellation, failure, or reload leaves a resumable original brief and saved follow-ups; status replies report actual phase and elapsed time without inventing an ETA.
 - Two alternative previews from the same base; choose by voice, button, or clicking the preferred element. Only the chosen version enters history.
 - Upload and replace images, ask for image placement and circular/bolder styling, and reuse uploaded assets on the call.
 - Dynamic website tours and change highlights based on actual element inventory and computed-style changes.

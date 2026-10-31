@@ -1,3 +1,4 @@
+import { cleanWork } from './workConversation.js';
 // Local persistence with strict validation. Anything malformed is dropped rather than trusted.
 
 const PREFIX = 'commonground:v1:';
@@ -138,7 +139,9 @@ function cleanMessage(m) {
     role: m.role,
     content: m.content,
     at: m.at,
-    via: m.via === 'voice' ? 'voice' : 'text',
+    via: ['voice', 'brief', 'resume', 'resume-followup'].includes(m.via)
+      ? m.via
+      : 'text',
     ref: cleanRef(m.ref),
     action: ['none', 'point', 'clarify', 'edit'].includes(m.action)
       ? m.action
@@ -189,6 +192,7 @@ export function validateSession(raw, projectId) {
       : undefined,
     createdAt: num(raw.createdAt) ? raw.createdAt : Date.now(),
     updatedAt: num(raw.updatedAt) ? raw.updatedAt : Date.now(),
+    work: cleanWork(raw.work),
     versions: unique,
     messages,
     currentVersionId,

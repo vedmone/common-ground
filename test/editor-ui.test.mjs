@@ -143,7 +143,7 @@ test(
       server: {
         middlewareMode: true,
         hmr: false,
-        ws: { port: 0, host: '127.0.0.1' },
+        ws: false,
       },
       appType: 'custom',
     });

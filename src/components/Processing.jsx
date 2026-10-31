@@ -82,3 +82,50 @@ export function Walkthrough({ walk, onNext, onPrevious, onToggle, onStop }) {
     </div>
   );
 }
+
+export function InterruptedWork({ work, onResume }) {
+  return (
+    <div
+      className="processing-panel"
+      role="status"
+      aria-label="Interrupted build"
+    >
+      <div className="processing-title">
+        <b>
+          {work.state === 'failed'
+            ? 'Build needs another try'
+            : 'Build interrupted'}
+        </b>
+        <button className="btn btn-primary btn-sm" onClick={onResume}>
+          Resume build
+        </button>
+      </div>
+      <p>
+        {work.error ||
+          'The previous build stopped before it finished. Your original request is saved.'}
+      </p>
+      <p className="processing-reply" title={work.request}>
+        {work.request.length > 240
+          ? `${work.request.slice(0, 240)}…`
+          : work.request}
+      </p>
+      {work.target?.label && <p>Selected element: {work.target.label}</p>}
+    </div>
+  );
+}
+
+export function PendingClarification({ work }) {
+  return (
+    <div
+      className="processing-panel"
+      role="status"
+      aria-label="Waiting for details"
+    >
+      <div className="processing-title">
+        <b>One detail before I build</b>
+      </div>
+      <p className="processing-reply">{work.question}</p>
+      <p>Answer on the call to continue. Your original brief is saved.</p>
+    </div>
+  );
+}

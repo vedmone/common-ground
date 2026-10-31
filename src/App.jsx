@@ -28,7 +28,11 @@ import HelpPanel from './components/HelpPanel.jsx';
 import TourBanner from './components/TourBanner.jsx';
 import PageEditor from './components/PageEditor.jsx';
 import CompareView from './components/CompareView.jsx';
-import Processing, { Walkthrough } from './components/Processing.jsx';
+import Processing, {
+  Walkthrough,
+  InterruptedWork,
+  PendingClarification,
+} from './components/Processing.jsx';
 import AssetsPanel from './components/AssetsPanel.jsx';
 import PublishPanel from './components/PublishPanel.jsx';
 import { ConfirmDialog, Toasts, Sheet } from './components/Feedback.jsx';
@@ -64,6 +68,14 @@ import {
 } from './lib/util.js';
 import { loadProjects, saveProjects, blankHTML } from './lib/projects.js';
 import { changedTargets, pageTour, comparisonChoice } from './lib/changes.js';
+import {
+  classifyWorkUtterance,
+  hasPageContent,
+  isCreationRequest,
+  continueCreation,
+  recoverableBuild,
+  workReply,
+} from './lib/workConversation.js';
 
 /* ---------------- session helpers ---------------- */
 
@@ -259,7 +271,8 @@ export default function App() {
   const speechQueue = useMemo(() => new SpeechQueue(player), [player]);
   const transcribeCtrls = useRef(new Set());
   const utterRefs = useRef(new Map());
-  const queueRef = useRef(null);
+  const queueRef = useRef([]);
+  const queueDispatchTimer = useRef(null);
   const snapshotWaiters = useRef(new Map());
   const levelListeners = useRef(new Set());
   const composerRef = useRef(null);
@@ -270,6 +283,7 @@ export default function App() {
   const toastTimers = useRef(new Set());
 
   const current = currentOf(session);
+  const recoverable = useMemo(() => recoverableBuild(session), [session]);
   const voiceProfile = useMemo(
     () =>
       conversationLanguage(
@@ -339,6 +353,8 @@ export default function App() {
       tour.cancel(false);
       player.stop();
       turnRef.current?.controller.abort();
+      turnRef.current = null;
+      clearTimeout(queueDispatchTimer.current);
       speechQueue.cancel();
       for (const timer of toastTimers.current) clearTimeout(timer);
       toastTimers.current.clear();
@@ -591,7 +607,17 @@ export default function App() {
   /* ---------- interrupt ---------- */
   const interrupt = useCallback(
     ({ silent = false } = {}) => {
-      const hadTurn = !!turnRef.current;
+      const active = turnRef.current;
+      const hadTurn = !!active;
+      if (active)
+        setSession((s) =>
+          s.work?.id === active.id
+            ? {
+                ...s,
+                work: { ...s.work, state: 'cancelled', finishedAt: Date.now() },
+              }
+            : s,
+        );
       turnRef.current?.controller.abort();
       turnRef.current = null;
       speechQueue.cancel();
@@ -601,7 +627,9 @@ export default function App() {
       player.stop();
       tour.cancel();
       stopWalkthrough();
-      queueRef.current = null;
+      clearTimeout(queueDispatchTimer.current);
+      queueDispatchTimer.current = null;
+      queueRef.current = [];
       setQueued(null);
       setTurn({ phase: 'idle', startedAt: 0 });
       if (!silent && (hadTurn || wasSpeaking))
@@ -617,7 +645,10 @@ export default function App() {
 
   /* ---------- speech ---------- */
   const speakText = useCallback(
-    async (text, { messageId, onStart, language, kind = 'reply' } = {}) => {
+    async (
+      text,
+      { messageId, onStart, language, kind = 'reply', isCurrent } = {},
+    ) => {
       const {
         health: h,
         settings: st,
@@ -645,6 +676,7 @@ export default function App() {
                 ),
           {
             kind,
+            isCurrent,
             onStart: (duration) => {
               setSpeakingMessageId(messageId || null);
               onStart?.(duration);
@@ -690,6 +722,7 @@ export default function App() {
         c = live.current.call;
       if (
         t.phase !== 'building' ||
+        turnRef.current?.speechInterrupted ||
         Date.now() - t.startedAt < 10000 ||
         Date.now() - progressVoiceAt.current < 14000 ||
         player.playing ||
@@ -712,7 +745,14 @@ export default function App() {
         local: true,
         progress: true,
       });
-      speakText(content, { language, kind: 'progress' });
+      const progressJobId = turnRef.current?.id;
+      speakText(content, {
+        language,
+        kind: 'progress',
+        isCurrent: () =>
+          turnRef.current?.id === progressJobId &&
+          live.current.turn.phase === 'building',
+      });
     }, 2000);
     return () => clearInterval(timer);
   }, [
@@ -914,21 +954,89 @@ export default function App() {
   /* ---------- the conversational turn ---------- */
   const runTurnRef = useRef(null);
 
-  const finishTurn = useCallback((id) => {
-    if (turnRef.current?.id !== id) return;
-    turnRef.current = null;
-    setTurn({ phase: 'idle', startedAt: 0 });
-    const next = queueRef.current;
-    if (next) {
-      queueRef.current = null;
-      setQueued(null);
-      setTimeout(() => runTurnRef.current?.(next.text, next.opts), 50);
+  const finishTurn = useCallback(
+    (id) => {
+      if (turnRef.current?.id !== id) return;
+      const completed = turnRef.current.work;
+      turnRef.current = null;
+      setTurn({ phase: 'idle', startedAt: 0 });
+      if (completed?.state === 'failed') {
+        queueRef.current = [];
+        setQueued(null);
+        return;
+      }
+      const next = queueRef.current.shift();
+      if (
+        next &&
+        completed?.task === 'create' &&
+        completed.state === 'answered'
+      ) {
+        next.text = continueCreation(completed.request, next.text);
+        next.opts.task = 'create';
+      }
+      setQueued(
+        queueRef.current.length
+          ? queueRef.current.map((x) => clip(x.text, 70)).join(' · ')
+          : null,
+      );
+      if (next)
+        queueDispatchTimer.current = setTimeout(() => {
+          queueDispatchTimer.current = null;
+          if (live.current.project.id !== next.projectId) return;
+          const freshReference = next.opts.reference;
+          const ids = new Set(store.elements.map((e) => e.id));
+          const reference = freshReference
+            ? {
+                ...freshReference,
+                selection: ids.has(freshReference.selection?.id)
+                  ? freshReference.selection
+                  : null,
+                hover: ids.has(freshReference.hover?.id)
+                  ? freshReference.hover
+                  : null,
+              }
+            : undefined;
+          runTurnRef.current?.(next.text, { ...next.opts, reference });
+        }, 50);
+    },
+    [store],
+  );
+
+  const resumeWork = useCallback(() => {
+    const L = live.current;
+    if (turnRef.current) return;
+    const work = recoverableBuild(L.session);
+    if (!work) return;
+    let reference;
+    if (work.task === 'edit' && work.target) {
+      const target =
+        store.elements.find((e) => e.id === work.target.id) ||
+        store.getSnapshot().selection;
+      if (!target) {
+        const content =
+          L.voiceProfile.style === 'hinglish'
+            ? 'वह element अभी नहीं मिल रहा. Page पर उसे select करके फिर “resume build” बोलिए.'
+            : 'Select the original element on the page, then say “resume build”. I can’t find its saved reference.';
+        toast(content, 'info');
+        if (L.call.active && !L.call.speakerMuted)
+          speakText(content, { language: L.voiceProfile.style });
+        return;
+      }
+      reference = { selection: target, hover: null, trail: [] };
     }
-  }, []);
+    runTurnRef.current?.(work.request, {
+      task: work.task,
+      via: 'resume',
+      followups: work.followups || [],
+      reference,
+    });
+  }, [store, toast, speakText]);
 
   const sendTurn = useCallback(
     async (rawText, opts = {}) => {
-      const text = String(rawText || '').trim();
+      const text = String(rawText || '')
+        .trim()
+        .slice(0, 5000);
       if (!text) return;
       const L = live.current;
       if (walkRef.current) stopWalkthrough();
@@ -949,6 +1057,135 @@ export default function App() {
       userMsg.language = language;
       setSession((s) => ({ ...s, voiceStyle: language }));
       setDetectedLanguage(language);
+      const active = turnRef.current;
+      const conversationalIntent = classifyWorkUtterance(text);
+      const recovery = recoverableBuild(L.session);
+      const respondAboutWork = (kind) => {
+        const content = workReply(kind, {
+          active: !!active,
+          work: active?.work || recovery || L.session.work,
+          turn: active
+            ? {
+                phase: active.stage || L.turn.phase,
+                lastProgressAt: active.lastProgressAt,
+                startedAt: active.startedAt,
+              }
+            : L.turn,
+          hasPage:
+            hasPageContent(L.current.html) ||
+            (L.project.id === 'companion' &&
+              L.companion.status === 'connected'),
+          language,
+        });
+        if (active) active.speechInterrupted = false;
+        appendMessages(userMsg, {
+          id: uid('m'),
+          role: 'assistant',
+          content,
+          at: Date.now(),
+          language,
+          local: true,
+          progress: !!active,
+        });
+        if (L.call.active && !L.call.speakerMuted)
+          speakText(content, {
+            language,
+            kind: 'status',
+            isCurrent: () =>
+              active ? turnRef.current?.id === active.id : !turnRef.current,
+          });
+      };
+      const lastConversationReply = [...L.session.messages]
+        .reverse()
+        .find((m) => m.role === 'assistant' && !m.progress);
+      const acknowledgesAProposal =
+        L.session.work?.awaitingClarification ||
+        lastConversationReply?.action === 'clarify';
+      const acceptsAnActualVersion =
+        KEEP_RE.test(text) &&
+        L.current.status === 'pending' &&
+        !acknowledgesAProposal;
+      if (
+        conversationalIntent === 'status' ||
+        (!active &&
+          conversationalIntent === 'acknowledge' &&
+          !acceptsAnActualVersion &&
+          !acknowledgesAProposal) ||
+        (!active && conversationalIntent === 'resume' && !recovery) ||
+        (active && ['acknowledge', 'resume'].includes(conversationalIntent)) ||
+        (!active && recovery && conversationalIntent === 'acknowledge')
+      ) {
+        respondAboutWork(conversationalIntent);
+        return;
+      }
+      if (conversationalIntent === 'resume' && recovery && !active) {
+        appendMessages(userMsg);
+        resumeWork();
+        return;
+      }
+      if (conversationalIntent === 'silence') {
+        if (active) active.speechInterrupted = true;
+        speechQueue.cancel();
+        appendMessages(userMsg);
+        return;
+      }
+      if (conversationalIntent === 'cancel') {
+        appendMessages(userMsg);
+        interrupt();
+        return;
+      }
+      if (active && !UNDO_RE.test(text)) {
+        active.speechInterrupted = false;
+        if (queueRef.current.length >= 8) {
+          const content =
+            language === 'hinglish'
+              ? 'आठ changes अभी बाकी हैं. पहले इन्हें पूरा कर लूँ, फिर अगला जोड़ते हैं.'
+              : 'I have eight changes waiting. Let me finish those before adding more.';
+          appendMessages({
+            id: uid('m'),
+            role: 'assistant',
+            content,
+            at: Date.now(),
+            language,
+            local: true,
+            progress: true,
+          });
+          if (L.call.active && !L.call.speakerMuted)
+            speakText(content, { language });
+          return;
+        }
+        queueRef.current.push({
+          text,
+          projectId: L.project.id,
+          opts: { ...opts, reference },
+        });
+        setQueued(queueRef.current.map((x) => clip(x.text, 70)).join(' · '));
+        active.speechInterrupted = false;
+        const content = workReply('revision', { active: true, language });
+        appendMessages({
+          id: uid('m'),
+          role: 'assistant',
+          content,
+          at: Date.now(),
+          language,
+          local: true,
+          progress: true,
+        });
+        setSession((s) =>
+          s.work?.id === active.id
+            ? {
+                ...s,
+                work: {
+                  ...s.work,
+                  followups: queueRef.current.map((x) => x.text),
+                },
+              }
+            : s,
+        );
+        if (L.call.active && !L.call.speakerMuted)
+          speakText(content, { language });
+        return;
+      }
       if (L.comparison) {
         const choice = comparisonChoice(text);
         if (choice !== null) {
@@ -1029,14 +1266,6 @@ export default function App() {
         });
         return;
       }
-      if (turnRef.current) {
-        if (opts.via === 'voice') {
-          queueRef.current = { text, opts: { ...opts, reference } };
-          setQueued(text);
-          return;
-        }
-        interrupt({ silent: true });
-      }
 
       tour.cancel(false);
       speechQueue.cancel();
@@ -1056,7 +1285,12 @@ export default function App() {
 
       let earlyReply = '';
 
-      turnRef.current = { id, controller };
+      turnRef.current = {
+        id,
+        controller,
+        startedAt: Date.now(),
+        stage: 'understanding',
+      };
       progressVoiceAt.current = Date.now();
       setTurn({
         phase: 'thinking',
@@ -1071,6 +1305,18 @@ export default function App() {
         L.session.versions,
       );
       const curVersion = currentOf(L.session);
+      const continuingCreation =
+        L.session.work?.task === 'create' &&
+        acknowledgesAProposal &&
+        !hasPageContent(curVersion.html);
+      const fullCreationRequest = continuingCreation
+        ? continueCreation(L.session.work.request, text)
+        : text;
+      if (continuingCreation)
+        history[history.length - 1] = {
+          ...history.at(-1),
+          content: fullCreationRequest,
+        };
       const selection = reference.selection
         ? { ...reference.selection, locked: true }
         : reference.hover
@@ -1098,15 +1344,33 @@ export default function App() {
           projectAtStart !== 'companion' && (opts.compare ?? L.compareMode),
         task:
           opts.task ||
+          (continuingCreation ||
           (L.project.id.startsWith('custom_') &&
-          curVersion.status === 'base' &&
-          curVersion.html.includes('A FRESH CANVAS') &&
-          /(?:landing\s*page|web\s*site|web\s*page|(?:build|create|make|design)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:page|site)|page\s+for|वेबसाइट|लैंडिंग\s*पेज)/i.test(
-            text,
-          )
+            !hasPageContent(curVersion.html) &&
+            isCreationRequest(text))
             ? 'create'
             : 'edit'),
       };
+      if (opts.followups?.length) {
+        queueRef.current = opts.followups.slice(0, 8).map((followup) => ({
+          text: followup,
+          projectId: projectAtStart,
+          opts: { via: 'resume-followup' },
+        }));
+        setQueued(queueRef.current.map((x) => clip(x.text, 70)).join(' · '));
+      }
+      const work = {
+        id,
+        request: fullCreationRequest,
+        task: payload.task,
+        target: refSummary(reference),
+        state: 'running',
+        startedAt: turnRef.current.startedAt,
+        stage: 'understanding',
+        followups: queueRef.current.map((x) => x.text),
+      };
+      turnRef.current.work = work;
+      setSession((s) => ({ ...s, work }));
       const beforeElements = store.elements.map((e) => ({
         ...e,
         styles: { ...e.styles },
@@ -1162,15 +1426,24 @@ export default function App() {
                 });
               }
             }
-            if (event.type === 'stage')
+            if (event.type === 'stage') {
+              turnRef.current.stage = event.stage;
+              turnRef.current.lastProgressAt = Date.now();
+              setSession((s) =>
+                s.work?.id === id
+                  ? { ...s, work: { ...s.work, stage: event.stage } }
+                  : s,
+              );
               setTurn((t) => ({
                 ...t,
                 phase:
                   event.stage === 'understanding' ? 'thinking' : event.stage,
                 label: event.label,
               }));
+            }
             if (event.type === 'code' && Date.now() - lastProgress > 120) {
               lastProgress = Date.now();
+              turnRef.current.lastProgressAt = Date.now();
               setTurn((t) => ({
                 ...t,
                 characters: Math.max(t.characters || 0, event.characters),
@@ -1209,7 +1482,7 @@ export default function App() {
           live.current.project.id !== projectAtStart
         )
           return;
-        await handleResult(result, {
+        const outcome = await handleResult(result, {
           id,
           projectAtStart,
           parent: curVersion,
@@ -1217,8 +1490,51 @@ export default function App() {
           earlyReply,
           beforeElements,
         });
+        if (turnRef.current?.id === id && turnRef.current.work)
+          turnRef.current.work.state =
+            outcome?.outcome ||
+            (['edit', 'compare'].includes(result.action)
+              ? 'ready'
+              : 'answered');
+        if (turnRef.current?.id === id)
+          setSession((s) =>
+            s.work?.id === id
+              ? {
+                  ...s,
+                  work: {
+                    ...s.work,
+                    awaitingClarification: result.action === 'clarify',
+                    question:
+                      result.action === 'clarify'
+                        ? String(result.reply || '').slice(0, 400)
+                        : '',
+                    state:
+                      outcome?.outcome ||
+                      (['edit', 'compare'].includes(result.action)
+                        ? 'ready'
+                        : 'answered'),
+                    error: outcome?.error || '',
+                    finishedAt: Date.now(),
+                  },
+                }
+              : s,
+          );
       } catch (e) {
         if (isAbort(e) || turnRef.current?.id !== id) return;
+        if (turnRef.current.work) turnRef.current.work.state = 'failed';
+        setSession((s) =>
+          s.work?.id === id
+            ? {
+                ...s,
+                work: {
+                  ...s.work,
+                  state: 'failed',
+                  error: e.message || 'The build failed.',
+                  finishedAt: Date.now(),
+                },
+              }
+            : s,
+        );
         appendMessages({
           id: uid('m'),
           role: 'note',
@@ -1443,6 +1759,7 @@ export default function App() {
     }
 
     if (versionId) {
+      if (turnRef.current?.id === id) turnRef.current.stage = 'applying';
       setTurn((t) => ({ ...t, phase: 'applying' }));
       await store.waitForReady(generation, 6000);
     }
@@ -1533,6 +1850,10 @@ export default function App() {
           tour.audioUnavailable();
       });
     }
+    return {
+      outcome: editError ? 'failed' : versionId ? 'ready' : 'answered',
+      error: editError,
+    };
   };
 
   /* ---------- voice call ---------- */
@@ -1556,15 +1877,12 @@ export default function App() {
           : await api.transcribe(blob, filename, ctrl.signal);
         const text = String(r?.transcript || '').trim();
         if (!text) {
+          if (turnRef.current) turnRef.current.speechInterrupted = false;
           toast(
             'I didn’t catch that. Try again a little closer to the mic.',
             'info',
             3000,
           );
-          return;
-        }
-        if (STOP_RE.test(text)) {
-          interrupt();
           return;
         }
         const detected = String(r.language_code || '');
@@ -1574,7 +1892,6 @@ export default function App() {
           ? detected
           : 'auto';
         if (language !== 'auto') setDetectedLanguage(language);
-        if (turnRef.current) interrupt({ silent: true });
         await runTurnRef.current(text, {
           via: 'voice',
           reference,
@@ -1583,7 +1900,10 @@ export default function App() {
           transcribedAt: Date.now(),
         });
       } catch (e) {
-        if (!isAbort(e)) note(`Transcription failed: ${e.message}`, 'error');
+        if (!isAbort(e)) {
+          if (turnRef.current) turnRef.current.speechInterrupted = false;
+          note(`Transcription failed: ${e.message}`, 'error');
+        }
       } finally {
         transcribeCtrls.current.delete(ctrl);
         setTranscribing((n) => Math.max(0, n - 1));
@@ -2417,6 +2737,12 @@ export default function App() {
               Publish
             </button>
           </div>
+          {!busy && session.work?.awaitingClarification && (
+            <PendingClarification work={session.work} />
+          )}
+          {!busy && recoverable && (
+            <InterruptedWork work={recoverable} onResume={resumeWork} />
+          )}
           {walkthrough && (
             <Walkthrough
               walk={walkthrough}

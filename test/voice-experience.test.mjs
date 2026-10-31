@@ -353,3 +353,29 @@ test('speech keeps Hindi-English text intact, returns MP3, and recognition prese
     else process.env.SARVAM_API_KEY = key;
   }
 });
+
+test('an outdated in-flight status clip is skipped when the build completes before its audio is ready', async () => {
+  const status = deferred(),
+    played = [];
+  let active = true;
+  const queue = new SpeechQueue({
+    async play(audio) {
+      played.push(audio);
+      return 'ended';
+    },
+    stop() {},
+  });
+  const staleStatus = queue.enqueue(() => status.promise, {
+    kind: 'status',
+    isCurrent: () => active,
+  });
+  await flush();
+  active = false;
+  const completed = queue.enqueue(async () => ({
+    audio: 'Your page is ready.',
+  }));
+  status.resolve({ audio: 'I am still building the page.' });
+  assert.equal(await staleStatus, 'skipped');
+  assert.equal(await completed, 'ended');
+  assert.deepEqual(played, ['Your page is ready.']);
+});
