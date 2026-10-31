@@ -7,6 +7,7 @@ export class SpeechPlayer {
     this.finish = null;
     this.listeners = new Set();
     this.playing = false;
+    this.volume = 1;
   }
 
   subscribe(fn) {
@@ -28,9 +29,12 @@ export class SpeechPlayer {
     } catch {
       return Promise.resolve('error');
     }
-    const url = URL.createObjectURL(new Blob([bytes], { type: mimeType || 'audio/wav' }));
+    const url = URL.createObjectURL(
+      new Blob([bytes], { type: mimeType || 'audio/wav' }),
+    );
     const audio = new Audio(url);
     audio.preload = 'auto';
+    audio.volume = this.volume;
     this.audio = audio;
     this.url = url;
     return new Promise((resolve) => {
@@ -59,8 +63,17 @@ export class SpeechPlayer {
       };
       audio.onended = () => finish('ended');
       audio.onerror = () => finish('error');
-      audio.play().catch((err) => finish(err?.name === 'NotAllowedError' ? 'blocked' : 'error'));
+      audio
+        .play()
+        .catch((err) =>
+          finish(err?.name === 'NotAllowedError' ? 'blocked' : 'error'),
+        );
     });
+  }
+
+  setVolume(value) {
+    this.volume = Math.max(0, Math.min(1, value));
+    if (this.audio) this.audio.volume = this.volume;
   }
 
   stop() {

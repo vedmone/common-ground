@@ -5,27 +5,44 @@
 // utterance, and a fresh segment starts. Silence-only segments are recycled every few seconds.
 // Tap-to-talk: segments start/stop only when the user asks (manual stop).
 
-const MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/ogg'];
+const MIME_CANDIDATES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg;codecs=opus',
+  'audio/ogg',
+];
 
 export function pickMimeType() {
   if (typeof MediaRecorder === 'undefined') return '';
-  for (const t of MIME_CANDIDATES) if (MediaRecorder.isTypeSupported?.(t)) return t;
+  for (const t of MIME_CANDIDATES)
+    if (MediaRecorder.isTypeSupported?.(t)) return t;
   return '';
 }
 
 export function voiceSupport() {
-  if (typeof window === 'undefined') return { ok: false, reason: 'Voice needs a browser.' };
-  if (!window.isSecureContext) return { ok: false, reason: 'Voice needs a secure (https or localhost) page.' };
-  if (!navigator.mediaDevices?.getUserMedia) return { ok: false, reason: 'This browser cannot access a microphone.' };
-  if (typeof MediaRecorder === 'undefined') return { ok: false, reason: 'This browser cannot record audio.' };
+  if (typeof window === 'undefined')
+    return { ok: false, reason: 'Voice needs a browser.' };
+  if (!window.isSecureContext)
+    return {
+      ok: false,
+      reason: 'Voice needs a secure (https or localhost) page.',
+    };
+  if (!navigator.mediaDevices?.getUserMedia)
+    return { ok: false, reason: 'This browser cannot access a microphone.' };
+  if (typeof MediaRecorder === 'undefined')
+    return { ok: false, reason: 'This browser cannot record audio.' };
   return { ok: true, reason: '' };
 }
 
 export function micErrorMessage(error) {
   const name = error?.name || '';
-  if (name === 'NotAllowedError' || name === 'SecurityError') return 'Microphone permission was denied. Allow it in your browser’s site settings, then start the call again.';
-  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'No microphone was found. Connect one and try again.';
-  if (name === 'NotReadableError') return 'Your microphone is in use by another app.';
+  if (name === 'NotAllowedError' || name === 'SecurityError')
+    return 'Microphone permission was denied. Allow it in your browser’s site settings, then start the call again.';
+  if (name === 'NotFoundError' || name === 'OverconstrainedError')
+    return 'No microphone was found. Connect one and try again.';
+  if (name === 'NotReadableError')
+    return 'Your microphone is in use by another app.';
   return error?.message || 'The microphone could not start.';
 }
 
@@ -59,7 +76,12 @@ export class VoiceSession {
   async start({ handsFree = true } = {}) {
     this.handsFree = handsFree;
     this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      },
     });
     if (this.closed) {
       this.stream.getTracks().forEach((t) => t.stop());
@@ -75,7 +97,8 @@ export class VoiceSession {
     src.connect(this.analyser);
     this.buf = new Float32Array(this.analyser.fftSize);
     this.stream.getAudioTracks()[0]?.addEventListener('ended', () => {
-      if (!this.closed) this.h.onError?.(new Error('The microphone was disconnected.'));
+      if (!this.closed)
+        this.h.onError?.(new Error('The microphone was disconnected.'));
     });
     this.timer = setInterval(() => this.tick(), FRAME_MS);
     if (this.handsFree) this.openSegment();
@@ -130,6 +153,7 @@ export class VoiceSession {
     this.segment.voiced = true;
     this.segment.onsetAt = Date.now();
     this.h.onSpeechStart?.(this.segment.id);
+    this.h.onSpeechConfirmed?.(this.segment.id);
     this.emitState();
   }
 
@@ -160,12 +184,22 @@ export class VoiceSession {
     const chunks = [];
     let recorder;
     try {
-      recorder = this.mimeType ? new MediaRecorder(this.stream, { mimeType: this.mimeType }) : new MediaRecorder(this.stream);
+      recorder = this.mimeType
+        ? new MediaRecorder(this.stream, { mimeType: this.mimeType })
+        : new MediaRecorder(this.stream);
     } catch (error) {
       this.h.onError?.(error);
       return;
     }
-    const seg = { id: `seg${++this.segCounter}`, recorder, chunks, startedAt: Date.now(), onsetAt: 0, voiced: false, discard: false };
+    const seg = {
+      id: `seg${++this.segCounter}`,
+      recorder,
+      chunks,
+      startedAt: Date.now(),
+      onsetAt: 0,
+      voiced: false,
+      discard: false,
+    };
     recorder.ondataavailable = (e) => {
       if (e.data && e.data.size) chunks.push(e.data);
     };
@@ -174,7 +208,13 @@ export class VoiceSession {
       const type = recorder.mimeType || this.mimeType || 'audio/webm';
       const blob = new Blob(chunks, { type });
       const ext = /mp4/.test(type) ? 'm4a' : /ogg/.test(type) ? 'ogg' : 'webm';
-      this.h.onUtterance?.(blob, { segmentId: seg.id, filename: `speech.${ext}`, onsetAt: seg.onsetAt, endedAt: Date.now() });
+      this.h.onUtterance?.(blob, {
+        segmentId: seg.id,
+        filename: `speech.${ext}`,
+        onsetAt: seg.onsetAt,
+        speechEndedAt: seg.lastVoicedAt || Date.now(),
+        endedAt: Date.now(),
+      });
     };
     recorder.start(250);
     this.segment = seg;
@@ -206,8 +246,10 @@ export class VoiceSession {
     this.h.onLevel?.(this.level);
     if (this.muted || !this.segment) return;
 
-    const threshold = Math.max(0.014, this.floor * 2.6) * (this.playbackActive ? 2.1 : 1);
-    if (!this.speaking) this.floor = Math.min(0.05, this.floor * 0.96 + rms * 0.04);
+    const threshold =
+      Math.max(0.014, this.floor * 2.6) * (this.playbackActive ? 2.1 : 1);
+    if (!this.speaking)
+      this.floor = Math.min(0.05, this.floor * 0.96 + rms * 0.04);
 
     if (!this.handsFree) {
       if (rms > threshold) {
@@ -220,6 +262,7 @@ export class VoiceSession {
 
     if (rms > threshold) {
       this.speechFrames++;
+      this.segment.lastVoicedAt = Date.now();
       this.silenceMs = 0;
       if (this.speaking) this.voicedMs += FRAME_MS;
       if (!this.speaking && this.speechFrames >= 3) {
@@ -228,6 +271,10 @@ export class VoiceSession {
         this.segment.onsetAt = Date.now() - this.speechFrames * FRAME_MS;
         this.h.onSpeechStart?.(this.segment.id);
         this.emitState();
+      }
+      if (this.speaking && this.voicedMs >= 400 && !this.segment.confirmed) {
+        this.segment.confirmed = true;
+        this.h.onSpeechConfirmed?.(this.segment.id);
       }
     } else {
       this.speechFrames = Math.max(0, this.speechFrames - 1);
@@ -253,7 +300,11 @@ export class VoiceSession {
         this.openSegment();
       }
     }
-    if (this.speaking && this.segment && Date.now() - this.segment.onsetAt > 30000) {
+    if (
+      this.speaking &&
+      this.segment &&
+      Date.now() - this.segment.onsetAt > 30000
+    ) {
       this.speaking = false;
       this.segment.voiced = true;
       this.closeSegment();

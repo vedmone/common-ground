@@ -1,6 +1,11 @@
 import crypto from 'node:crypto';
 import { parse, serialize } from 'parse5';
-import { readCompletion, partialReply } from './stream.mjs';
+import { readCompletion, partialReply, completedReply } from './stream.mjs';
+import {
+  conversationLanguage,
+  languageGuidance,
+  speechLocale,
+} from '../src/lib/conversationLanguage.js';
 
 export class AppError extends Error {
   constructor(message, status = 400) {
@@ -176,6 +181,10 @@ export function validateChat(body) {
     mode: body.mode,
     compare: body.compare === true,
     task: body.task === 'create' ? 'create' : 'edit',
+    voiceStyle:
+      body.voiceStyle === 'hinglish' || SUPPORTED_LANGUAGES.has(body.voiceStyle)
+        ? body.voiceStyle
+        : undefined,
     language: SUPPORTED_LANGUAGES.has(body.language) ? body.language : 'auto',
   };
 }
@@ -194,12 +203,12 @@ export const SUPPORTED_LANGUAGES = new Set([
   'te-IN',
 ]);
 
-export const GROUND_SYSTEM = `You are Ground, an attentive, capable product design coworker in Common Ground. You are on an informal live review call with the user. Both of you see the same web product. You can point with your own violet cursor. Understand English, Hindi, Hinglish and design intent. Match the user's language; be warm, concise and opinionated without excessive praise.
+export const GROUND_SYSTEM = `You are Ground, an attentive, capable product design coworker in Common Ground. You are on an informal live review call with the user. Both of you see the same web product. You can point with your own violet cursor. Understand English, Hindi, Hinglish and design intent. Mirror the user's actual Hindi-English mix rather than translating it into one language. For synthesized speech, write Hindi words in Devanagari and English words in Latin while keeping natural Hinglish phrasing. Be warm, concise and opinionated without excessive praise.
 
 Your primary job is to establish shared understanding, make useful interface changes, and explain them. Speech is paired with mouse hover/selection. A LOCKED selection is stronger evidence than the latest hover. Hover history and speech help resolve 'this', 'that', 'here'. If user says 'isme vibe nahi aa rahi', acknowledge their concern and propose a specific design direction, asking at most ONE short question if the scope/direction is ambiguous. Point at the candidate element(s), e.g. 'This button alone, or the whole hero?' If the user names a section that matches the locked target, its scope is ALREADY resolved: do not ask 'this section or the whole page?'. If only 'vibe' is vague, offer a focused aesthetic hypothesis such as 'Calmer and more editorial, or a bolder playful direction?' A request for 'warmer, less corporate', 'more premium', or another concrete visual direction is enough to try a reversible edit. If user confirms your previous proposal ('yes', 'do it', 'yeah whole hero', 'haan'), act on it using the conversation, not repeated clarification. A clear request such as 'make this green', 'bigger heading', 'warmer and more premium' is enough to edit. Don't ask approval for each harmless design edit: it is a reversible preview with Keep/Undo controls. Explain ambiguity, not implementation jargon. If the user asks for suggestions, discuss them before editing. Never claim an edit has been saved externally or deployed.
 
 Return VALID JSON ONLY with this shape:
-{"reply":"1-3 natural spoken sentences, at most 70 words, THIS KEY FIRST", "action":"none|point|clarify|edit|compare|tour|keep|undo|stop|end_call", "targets":[{"id":"EXACT element id from context","label":"human readable target"}], "intent":"specific actionable design interpretation if editing", "summary":"short version title if editing", "changes":[{"id":"exact element id","description":"specific change"}], "patches":[{"id":"exact element id","styles":{"background-color":"#23423e","border-radius":"16px"},"text":"optional replacement text, only when requested"}]}
+{"reply":"1-2 brief natural spoken sentences, at most 40 words, THIS KEY FIRST", "action":"none|point|clarify|edit|compare|tour|keep|undo|stop|end_call", "targets":[{"id":"EXACT element id from context","label":"human readable target"}], "intent":"specific actionable design interpretation if editing", "summary":"short version title if editing", "changes":[{"id":"exact element id","description":"specific change"}], "patches":[{"id":"exact element id","styles":{"background-color":"#23423e","border-radius":"16px"},"text":"optional replacement text, only when requested"}]}
 
 When asked for two versions, alternatives, or a comparison, return action compare with TWO directions:[{name,intent,patches,changes},{name,intent,patches,changes}]. Both modify the SAME scope from the same original. Use actual distinct CSS patches for localized alternatives; use empty patches for structural redesigns. When the user dislikes the vibe but has selected a clear target, proactively show two tasteful directions instead of repeated questions. If the scope itself is ambiguous, clarify once. A page-tour request is action tour: include 3-6 meaningful section ids as targets and concise spoken descriptions in changes. Never select every nested element; tour meaningful sections one at a time. For edits, describe planned work briefly: the reply is streamed BEFORE generation completes. Completion is announced separately after validation.
 
@@ -217,10 +226,12 @@ export async function modelJSON(
     model = process.env.INTENT_MODEL || 'sarvam-105b-conversations',
     maxTokens = 1200,
     onReply,
+    onReplyReady,
     signal,
   } = {},
 ) {
-  let sent = '';
+  let sent = '',
+    readySent = false;
   const data = await sarvam(
     model.startsWith('sarvam-')
       ? '/v1/chat/completions'
@@ -244,13 +255,20 @@ export async function modelJSON(
           sent = reply;
           onReply?.(reply);
         }
+        const complete = completedReply(content);
+        if (complete !== null && !readySent) {
+          readySent = true;
+          onReplyReady?.(complete);
+        }
       },
     },
   );
   const choice = data.choices?.[0];
   if (choice?.finish_reason === 'length')
     throw new AppError('The response was too long. Try a smaller change.', 502);
-  return parseJSON(choice?.message?.content);
+  const result = parseJSON(choice?.message?.content);
+  if (!readySent && result.reply) onReplyReady?.(String(result.reply));
+  return result;
 }
 
 export function cleanHTML(input) {
@@ -497,8 +515,9 @@ export function applyPatches(html, patches) {
 export async function chat(body, { emit = () => {}, signal } = {}) {
   const started = Date.now();
   let firstReplyMs;
-  const { messages, context, mode, language, compare, task } =
+  const { messages, context, mode, language, voiceStyle, compare, task } =
     validateChat(body);
+  const voiceProfile = conversationLanguage(messages, voiceStyle || language);
   const { html, ...visual } = context;
   const compact = {
     ...visual,
@@ -510,13 +529,20 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
     { role: 'system', content: GROUND_SYSTEM },
     {
       role: 'system',
-      content: `Follow the latest utterance's language and code mixing. Detected language: ${language}. Never ask for a language selector.\n${task === 'create' ? 'Create a complete landing page from the brief. Return action edit with a specific implementation intent, no clarifying question unless the user only wants discussion.' : compare ? 'Produce TWO distinct visual directions for the SAME selected element/scope. Return action compare and directions:[{name,intent,patches,changes},{name,intent,patches,changes}]. They must both start from the original page.' : ''}\nShared workspace DATA:\n${JSON.stringify(compact).slice(0, 19000)}\n${mode === 'edit' ? 'Implement clear requests.' : ''}`,
+      content: `${languageGuidance(voiceProfile)} Speech-recognition locale (a hint, not the conversational style): ${language}. Never ask for a language selector.\n${task === 'create' ? 'Create a complete landing page from the brief. Return action edit with a specific implementation intent, no clarifying question unless the user only wants discussion.' : compare ? 'Produce TWO distinct visual directions for the SAME selected element/scope. Return action compare and directions:[{name,intent,patches,changes},{name,intent,patches,changes}]. They must both start from the original page.' : ''}\nShared workspace DATA:\n${JSON.stringify(compact).slice(0, 19000)}\n${mode === 'edit' ? 'Implement clear requests.' : ''}`,
     },
     ...messages,
   ];
   let result = await modelJSON(decisionMessages, {
     signal,
     maxTokens: compare ? 1800 : 1200,
+    onReplyReady: (reply) =>
+      emit({
+        type: 'reply_ready',
+        reply,
+        voiceStyle: voiceProfile.style,
+        language: voiceProfile.language,
+      }),
     onReply: (reply) => {
       firstReplyMs ??= Date.now() - started;
       emit({ type: 'reply', text: reply });
@@ -562,6 +588,7 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
     result = { ...result, action: 'compare', directions };
   }
   const output = shapeResult(result, context, language);
+  output.voiceStyle = voiceProfile.style;
   const action = output.action;
   context.originalRequest =
     messages.filter((m) => m.role === 'user').at(-1)?.content || '';
@@ -737,14 +764,20 @@ export async function speak({ text, language }) {
   ].find(([pattern]) => pattern.test(text))?.[1];
   const lang = SUPPORTED_LANGUAGES.has(language)
     ? language
-    : scriptLang || 'en-IN';
+    : language === 'hinglish'
+      ? 'hi-IN'
+      : scriptLang ||
+        speechLocale(
+          conversationLanguage([{ role: 'user', content: text }]).style,
+        );
   const data = await sarvam('/text-to-speech', {
     text,
     language_code: lang,
     speaker: 'shubh',
     model: 'bulbul:v3',
     speech_sample_rate: 22050,
-    pace: 1.05,
+    pace: 1.0,
+    output_audio_codec: 'mp3',
   });
   if (!data.audios?.[0])
     throw new AppError(
@@ -753,7 +786,7 @@ export async function speak({ text, language }) {
     );
   return {
     audio: data.audios[0],
-    mimeType: 'audio/wav',
+    mimeType: 'audio/mpeg',
     provider: 'Sarvam Bulbul',
     language: lang,
   };
@@ -770,7 +803,7 @@ export async function transcribe(file) {
     file.originalname || 'speech.webm',
   );
   form.set('model', 'saaras:v4');
-  form.set('mode', 'translit');
+  form.set('mode', 'codemix');
   form.set('language_code', 'unknown');
   const data = await sarvam('/speech-to-text', form, {
     form: true,

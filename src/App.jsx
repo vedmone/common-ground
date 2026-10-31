@@ -50,6 +50,8 @@ import { createBridgeStore } from './lib/bridgeStore.js';
 import { PointerTour, resolveTargets } from './lib/tour.js';
 import { VoiceSession, voiceSupport, micErrorMessage } from './lib/voice.js';
 import { SpeechPlayer } from './lib/player.js';
+import { SpeechQueue } from './lib/speechQueue.js';
+import { conversationLanguage, spokenUI } from './lib/conversationLanguage.js';
 import { DEMO_STEPS } from './lib/demo.js';
 import {
   uid,
@@ -254,7 +256,7 @@ export default function App() {
   const player = useMemo(() => new SpeechPlayer(), []);
   const voiceRef = useRef(null);
   const turnRef = useRef(null);
-  const speakCtrlRef = useRef(null);
+  const speechQueue = useMemo(() => new SpeechQueue(player), [player]);
   const transcribeCtrls = useRef(new Set());
   const utterRefs = useRef(new Map());
   const queueRef = useRef(null);
@@ -268,6 +270,14 @@ export default function App() {
   const toastTimers = useRef(new Set());
 
   const current = currentOf(session);
+  const voiceProfile = useMemo(
+    () =>
+      conversationLanguage(
+        session.messages,
+        session.voiceStyle || detectedLanguage,
+      ),
+    [session.messages, session.voiceStyle, detectedLanguage],
+  );
 
   // Latest values for callbacks that outlive a render (voice handlers, timers, async turns).
   const live = useRef(null);
@@ -288,6 +298,7 @@ export default function App() {
       walkthrough,
       assets,
       selectedAsset,
+      voiceProfile,
     };
     walkRef.current = walkthrough;
   });
@@ -328,19 +339,21 @@ export default function App() {
       tour.cancel(false);
       player.stop();
       turnRef.current?.controller.abort();
-      speakCtrlRef.current?.abort();
+      speechQueue.cancel();
       for (const timer of toastTimers.current) clearTimeout(timer);
       toastTimers.current.clear();
     },
     [tour, player],
   );
-  const stopWalkthrough = useCallback(() => {
-    walkRef.current = null;
-    setWalkthrough(null);
-    tour.cancel();
-    player.stop();
-    speakCtrlRef.current?.abort();
-  }, [player, tour]);
+  const stopWalkthrough = useCallback(
+    ({ preserveSpeech = false } = {}) => {
+      walkRef.current = null;
+      setWalkthrough(null);
+      tour.cancel();
+      if (!preserveSpeech) speechQueue.cancel();
+    },
+    [player, tour, speechQueue],
+  );
 
   useEffect(() => {
     sendToPreview({ type: 'cg:config', review: reviewMode });
@@ -581,8 +594,7 @@ export default function App() {
       const hadTurn = !!turnRef.current;
       turnRef.current?.controller.abort();
       turnRef.current = null;
-      speakCtrlRef.current?.abort();
-      speakCtrlRef.current = null;
+      speechQueue.cancel();
       for (const c of transcribeCtrls.current) c.abort();
       transcribeCtrls.current.clear();
       const wasSpeaking = player.playing;
@@ -605,32 +617,40 @@ export default function App() {
 
   /* ---------- speech ---------- */
   const speakText = useCallback(
-    async (text, { messageId, onStart, language } = {}) => {
-      const { health: h, settings: st, companion: comp } = live.current;
+    async (text, { messageId, onStart, language, kind = 'reply' } = {}) => {
+      const {
+        health: h,
+        settings: st,
+        companion: comp,
+        voiceProfile: profile,
+      } = live.current;
       const viaCompanion =
         !h.voice && comp.status === 'connected' && comp.info?.voice;
       if (!h.voice && !viaCompanion) return 'unavailable';
-      speakCtrlRef.current?.abort();
-      const ctrl = new AbortController();
-      speakCtrlRef.current = ctrl;
       try {
-        const r = viaCompanion
-          ? await api.speak(
-              text.slice(0, 2000),
-              language || st.language,
-              ctrl.signal,
-              companionApi.normalizeBase(st.companionUrl),
-              st.companionToken,
-            )
-          : await api.speak(
-              text.slice(0, 2000),
-              language || st.language,
-              ctrl.signal,
-            );
-        if (ctrl.signal.aborted) return 'cancelled';
-        if (!r?.audio) return 'error';
-        setSpeakingMessageId(messageId || null);
-        const result = await player.play(r.audio, r.mimeType, { onStart });
+        const result = await speechQueue.enqueue(
+          (signal) =>
+            viaCompanion
+              ? api.speak(
+                  text.slice(0, 2000),
+                  language || profile.style,
+                  signal,
+                  companionApi.normalizeBase(st.companionUrl),
+                  st.companionToken,
+                )
+              : api.speak(
+                  text.slice(0, 2000),
+                  language || profile.style,
+                  signal,
+                ),
+          {
+            kind,
+            onStart: (duration) => {
+              setSpeakingMessageId(messageId || null);
+              onStart?.(duration);
+            },
+          },
+        );
         if (result === 'blocked')
           toast(
             'Your browser blocked audio playback. Press Listen on the reply to hear it.',
@@ -642,20 +662,19 @@ export default function App() {
         if (isAbort(e)) return 'cancelled';
         toast(`Voice reply unavailable: ${e.message}`, 'error');
         return 'error';
-      } finally {
-        if (speakCtrlRef.current === ctrl) speakCtrlRef.current = null;
       }
     },
-    [player, toast],
+    [player, speechQueue, toast],
   );
 
   const listen = useCallback(
     (message) => {
       if (speakingMessageId === message.id) {
         player.stop();
-        speakCtrlRef.current?.abort();
+        speechQueue.cancel();
         return;
       }
+      speechQueue.cancel();
       speakText(message.content, {
         messageId: message.id,
         language: message.language,
@@ -674,26 +693,16 @@ export default function App() {
         Date.now() - t.startedAt < 10000 ||
         Date.now() - progressVoiceAt.current < 14000 ||
         player.playing ||
-        speakCtrlRef.current ||
+        speechQueue.busy ||
         voiceRef.current?.state === 'hearing' ||
         !c.active ||
         c.speakerMuted
       )
         return;
-      const language =
-        live.current.settings.language === 'auto'
-          ? detectedLanguage || 'en-IN'
-          : live.current.settings.language;
-      if (!['en-IN', 'hi-IN'].includes(language)) return;
+      const language = live.current.voiceProfile.style;
+      if (!['en-IN', 'hi-IN', 'hinglish'].includes(language)) return;
       progressVoiceAt.current = Date.now();
-      const content =
-        language === 'hi-IN'
-          ? t.characters
-            ? 'HTML aur styling par kaam chal raha hai. Taiyar hote hi dikhaata hoon.'
-            : 'Is badlav par kaam chal raha hai. Thoda sa aur waqt lagega.'
-          : t.characters
-            ? 'I’m writing the layout and styling now. I’ll show you as soon as it’s ready.'
-            : 'I’m still working on this change. Your current page is safe.';
+      const content = spokenUI('progress', language);
       appendMessages({
         id: uid('m'),
         role: 'assistant',
@@ -703,7 +712,7 @@ export default function App() {
         local: true,
         progress: true,
       });
-      speakText(content, { language });
+      speakText(content, { language, kind: 'progress' });
     }, 2000);
     return () => clearInterval(timer);
   }, [
@@ -717,8 +726,11 @@ export default function App() {
   ]);
 
   const startWalkthrough = useCallback(
-    (targets, { mode = 'page', language = 'auto' } = {}) => {
-      stopWalkthrough();
+    (
+      targets,
+      { mode = 'page', language = 'auto', preserveSpeech = false } = {},
+    ) => {
+      stopWalkthrough({ preserveSpeech });
       if (!targets.length) {
         toast('No visible sections are available for a tour yet.');
         return;
@@ -767,7 +779,7 @@ export default function App() {
                   : null
                 : x,
             ),
-          900,
+          350,
         );
     };
     if (call.active && !call.speakerMuted)
@@ -800,7 +812,8 @@ export default function App() {
   );
 
   const undo = useCallback(
-    async ({ announce = false } = {}) => {
+    async ({ announce = false, language } = {}) => {
+      const style = language || live.current.voiceProfile.style;
       const s = live.current.session;
       const cur = currentOf(s);
       if (!cur.parentId) {
@@ -809,8 +822,7 @@ export default function App() {
           appendMessages({
             id: uid('m'),
             role: 'assistant',
-            content:
-              'There’s nothing to undo yet. This is still the original version.',
+            content: spokenUI('nothingUndo', style),
             at: Date.now(),
             local: true,
           });
@@ -844,7 +856,8 @@ export default function App() {
         appendMessages({
           id: uid('m'),
           role: 'assistant',
-          content: `Undone “${cur.summary}”. You’re back on v${n}.`,
+          content: commandReply('undo', style),
+          language: style,
           at: Date.now(),
           local: true,
         });
@@ -928,6 +941,14 @@ export default function App() {
         via: opts.via || 'text',
         ref: refSummary(reference),
       };
+      const profile = conversationLanguage(
+        [...L.session.messages, userMsg],
+        L.voiceProfile.style || opts.language || L.settings.language,
+      );
+      const language = profile.style;
+      userMsg.language = language;
+      setSession((s) => ({ ...s, voiceStyle: language }));
+      setDetectedLanguage(language);
       if (L.comparison) {
         const choice = comparisonChoice(text);
         if (choice !== null) {
@@ -948,11 +969,16 @@ export default function App() {
       if (UNDO_RE.test(text)) {
         interrupt({ silent: true });
         appendMessages(userMsg);
-        const didUndo = await undo({ announce: true });
-        if (didUndo && L.call.active && !L.call.speakerMuted)
-          speakText(commandReply('undo', opts.language), {
-            language: opts.language,
-          });
+        const didUndo = await undo({ announce: true, language });
+        if (L.call.active && !L.call.speakerMuted)
+          speakText(
+            didUndo
+              ? commandReply('undo', language)
+              : spokenUI('nothingUndo', language),
+            {
+              language,
+            },
+          );
         return;
       }
       const lastReply = [...L.session.messages]
@@ -966,7 +992,7 @@ export default function App() {
         interrupt({ silent: true });
         appendMessages(userMsg);
         keep();
-        const reply = commandReply('keep', opts.language);
+        const reply = commandReply('keep', language);
         appendMessages({
           id: uid('m'),
           role: 'assistant',
@@ -975,7 +1001,7 @@ export default function App() {
           local: true,
         });
         if (L.call.active && !L.call.speakerMuted)
-          speakText(reply, { language: opts.language });
+          speakText(reply, { language });
         return;
       }
       if (STOP_RE.test(text)) {
@@ -1013,10 +1039,23 @@ export default function App() {
       }
 
       tour.cancel(false);
-      player.stop();
+      speechQueue.cancel();
+      player.setVolume(1);
       const controller = new AbortController();
       const id = uid('turn');
       const projectAtStart = L.project.id;
+      const metric =
+        opts.via === 'voice'
+          ? {
+              id,
+              speechEndedAt: opts.speechEndedAt,
+              transcribedAt: opts.transcribedAt,
+              requestAt: Date.now(),
+            }
+          : null;
+
+      let earlyReply = '';
+
       turnRef.current = { id, controller };
       progressVoiceAt.current = Date.now();
       setTurn({
@@ -1053,7 +1092,8 @@ export default function App() {
         messages: history,
         context,
         mode: L.settings.mode,
-        language: opts.language || L.settings.language,
+        language: profile.language,
+        voiceStyle: profile.style,
         compare:
           projectAtStart !== 'companion' && (opts.compare ?? L.compareMode),
         task:
@@ -1087,8 +1127,41 @@ export default function App() {
           let lastProgress = 0;
           result = await api.chat(payload, controller.signal, (event) => {
             if (turnRef.current?.id !== id) return;
-            if (event.type === 'reply')
+            if (event.type === 'reply') {
+              if (metric) metric.firstReplyAt ??= Date.now();
               setTurn((t) => ({ ...t, reply: event.text }));
+            }
+            if (event.type === 'reply_ready') {
+              const read =
+                live.current.call.active &&
+                !live.current.call.speakerMuted &&
+                !turnRef.current?.speechInterrupted;
+              if (metric) metric.replyReadyAt = Date.now();
+              if (read && !earlyReply) {
+                earlyReply = event.reply;
+                if (metric) metric.ttsRequestedAt = Date.now();
+                speakText(event.reply, {
+                  language,
+                  onStart: (duration) => {
+                    if (metric && !metric.firstAudioAt) {
+                      metric.firstAudioAt = Date.now();
+                      if (metric.speechEndedAt)
+                        metric.speechEndToAudioMs =
+                          metric.firstAudioAt - metric.speechEndedAt;
+                      if (live.current.project.id === projectAtStart)
+                        setSession((s) => ({
+                          ...s,
+                          voiceMetrics: [
+                            ...(s.voiceMetrics || []),
+                            { ...metric },
+                          ].slice(-40),
+                        }));
+                    }
+                    tour.syncToAudio(duration);
+                  },
+                });
+              }
+            }
             if (event.type === 'stage')
               setTurn((t) => ({
                 ...t,
@@ -1114,16 +1187,18 @@ export default function App() {
                 store.elements,
               );
               const read =
-                live.current.call.active && !live.current.call.speakerMuted;
+                live.current.call.active &&
+                !live.current.call.speakerMuted &&
+                !turnRef.current?.speechInterrupted;
               if (targets.length)
                 tour.start(targets, {
                   reply: event.reply,
                   tone: 'point',
                   expectAudio: read,
                 });
-              if (read)
+              if (read && !earlyReply)
                 speakText(event.reply, {
-                  language: payload.language,
+                  language,
                   onStart: (d) => tour.syncToAudio(d),
                 });
             }
@@ -1138,7 +1213,8 @@ export default function App() {
           id,
           projectAtStart,
           parent: curVersion,
-          language: payload.language,
+          language,
+          earlyReply,
           beforeElements,
         });
       } catch (e) {
@@ -1151,6 +1227,8 @@ export default function App() {
           content: e.message || 'Something went wrong. Your page is unchanged.',
           retry: { text, via: opts.via || 'text' },
         });
+        if (live.current.call.active && !live.current.call.speakerMuted)
+          speakText(spokenUI('error', language), { language });
       } finally {
         finishTurn(id);
       }
@@ -1181,7 +1259,14 @@ export default function App() {
 
   handleResultRef.current = async (
     result,
-    { id, projectAtStart, parent, language, beforeElements = [] },
+    {
+      id,
+      projectAtStart,
+      parent,
+      language,
+      earlyReply = '',
+      beforeElements = [],
+    },
   ) => {
     const action = [
       'none',
@@ -1214,10 +1299,7 @@ export default function App() {
         targetId: result.targets?.[0]?.id,
       });
       setCompareMode(false);
-      const content =
-        language === 'hi-IN'
-          ? 'Dono versions taiyar hain. A ya B, kaunsa behtar lag raha hai?'
-          : 'Both directions are ready. Choose A or B, or click the element you prefer.';
+      const content = spokenUI('compare', language);
       appendMessages({
         id: uid('m'),
         role: 'assistant',
@@ -1226,11 +1308,16 @@ export default function App() {
         language,
         local: true,
       });
-      if (live.current.call.active && !live.current.call.speakerMuted)
+      if (
+        live.current.call.active &&
+        !live.current.call.speakerMuted &&
+        !turnRef.current?.speechInterrupted
+      )
         speakText(content, { language });
       return;
     }
     if (action === 'tour') {
+      if (turnRef.current?.speechInterrupted) return;
       const targets = resolveTargets(result.targets || [], store.elements).map(
         (t) => ({
           ...t,
@@ -1238,9 +1325,13 @@ export default function App() {
             result.changes?.find((c) => c.id === t.id)?.description || t.label,
         }),
       );
-      startWalkthrough(targets.length ? targets : pageTour(store.elements), {
-        language,
-      });
+      startWalkthrough(
+        targets.length ? targets : pageTour(store.elements, language),
+        {
+          language,
+          preserveSpeech: true,
+        },
+      );
       return;
     }
     if (action === 'end_call') {
@@ -1276,7 +1367,11 @@ export default function App() {
         at: Date.now(),
         local: true,
       });
-      if (live.current.call.active && !live.current.call.speakerMuted)
+      if (
+        live.current.call.active &&
+        !live.current.call.speakerMuted &&
+        content !== earlyReply
+      )
         speakText(content, { language });
       return;
     }
@@ -1368,7 +1463,7 @@ export default function App() {
           ? rawTargets
           : rawTargets.slice(0, 2);
     const measured = versionId
-      ? changedTargets(beforeElements, elements, changes)
+      ? changedTargets(beforeElements, elements, changes, language)
       : [];
     const targets = versionId
       ? measured.length
@@ -1380,8 +1475,8 @@ export default function App() {
     const completion = editError
       ? editError
       : versionId
-        ? `${language === 'hi-IN' ? 'Badlav ho gaye.' : 'The change is ready.'} ${targets
-            .slice(0, 3)
+        ? `${spokenUI('complete', language)} ${targets
+            .slice(0, 2)
             .map((t) => t.description || t.label)
             .join('. ')}`
         : reply;
@@ -1416,7 +1511,9 @@ export default function App() {
     if (editError) note(editError, 'error');
 
     const { call: c, settings: st } = live.current;
-    const wantVoice = c.active ? !c.speakerMuted : st.readAloud;
+    const wantVoice =
+      (c.active ? !c.speakerMuted : st.readAloud) &&
+      !turnRef.current?.speechInterrupted;
     const tone =
       action === 'clarify'
         ? 'clarify'
@@ -1425,7 +1522,7 @@ export default function App() {
           : 'point';
     if (targets.length)
       tour.start(targets, { reply: completion, tone, expectAudio: wantVoice });
-    if (wantVoice) {
+    if (wantVoice && (versionId || completion !== earlyReply)) {
       // Speech runs outside the turn so the conversation is free while Ground talks (barge-in works).
       speakText(completion, {
         messageId: msg.id,
@@ -1440,7 +1537,7 @@ export default function App() {
 
   /* ---------- voice call ---------- */
   const transcribeAndSend = useCallback(
-    async (blob, filename, reference) => {
+    async (blob, filename, reference, meta = {}) => {
       const { health: h, companion: comp, settings: st } = live.current;
       const viaCompanion =
         !h.voice && comp.status === 'connected' && comp.info?.voice;
@@ -1477,7 +1574,14 @@ export default function App() {
           ? detected
           : 'auto';
         if (language !== 'auto') setDetectedLanguage(language);
-        await runTurnRef.current(text, { via: 'voice', reference, language });
+        if (turnRef.current) interrupt({ silent: true });
+        await runTurnRef.current(text, {
+          via: 'voice',
+          reference,
+          language,
+          speechEndedAt: meta.speechEndedAt || meta.endedAt,
+          transcribedAt: Date.now(),
+        });
       } catch (e) {
         if (!isAbort(e)) note(`Transcription failed: ${e.message}`, 'error');
       } finally {
@@ -1527,11 +1631,16 @@ export default function App() {
         for (const fn of levelListeners.current) fn(level);
       },
       onSpeechStart: (segmentId) => {
-        if (walkRef.current) stopWalkthrough();
         utterRefs.current.set(segmentId, captureReference());
-        player.stop();
-        speakCtrlRef.current?.abort();
+        player.setVolume(0.2);
       },
+      onSpeechConfirmed: () => {
+        if (turnRef.current) turnRef.current.speechInterrupted = true;
+        if (walkRef.current) stopWalkthrough();
+        speechQueue.cancel();
+        player.setVolume(1);
+      },
+      onSpeechDiscarded: () => player.setVolume(1),
       onUtterance: (blob, meta) => {
         let reference =
           utterRefs.current.get(meta.segmentId) || captureReference();
@@ -1540,14 +1649,15 @@ export default function App() {
           const later = captureReference();
           if (later.hover) reference = { ...reference, hover: later.hover };
         }
-        transcribeAndSend(blob, meta.filename, reference);
+        player.setVolume(1);
+        transcribeAndSend(blob, meta.filename, reference, meta);
       },
       onError: (e) => {
         const message = micErrorMessage(e);
         voiceRef.current?.stop();
         voiceRef.current = null;
         player.stop();
-        speakCtrlRef.current?.abort();
+        speechQueue.cancel();
         setCall((c) => ({
           ...c,
           active: false,
@@ -1614,7 +1724,7 @@ export default function App() {
     voiceRef.current = null;
     utterRefs.current.clear();
     player.stop();
-    speakCtrlRef.current?.abort();
+    speechQueue.cancel();
     for (const controller of transcribeCtrls.current) controller.abort();
     transcribeCtrls.current.clear();
     setCall((c) => ({
@@ -1637,13 +1747,14 @@ export default function App() {
         if (!vs) return;
         const muted = !vs.muted;
         vs.setMuted(muted);
+        player.setVolume(1);
         setCall((c) => ({ ...c, muted }));
       },
       toggleSpeaker: () => {
         const muting = !live.current.call.speakerMuted;
         if (muting) {
           player.stop();
-          speakCtrlRef.current?.abort();
+          speechQueue.cancel();
         }
         setCall((c) => ({ ...c, speakerMuted: muting }));
       },
@@ -1860,6 +1971,7 @@ export default function App() {
       c.beforeElements,
       store.elements,
       choice.changes || [],
+      c.language,
     );
     setSession((s) => ({
       ...s,
@@ -1876,7 +1988,7 @@ export default function App() {
       ),
     }));
     if (selectedId) sendToPreview({ type: 'cg:select', id: selectedId });
-    const content = `${choice.name} is now your page. The other preview has been discarded. ${targets
+    const content = `${spokenUI('chosen', c.language, { name: choice.name })} ${targets
       .slice(0, 2)
       .map((t) => t.description)
       .join('. ')}`;
@@ -2288,8 +2400,8 @@ export default function App() {
               className="btn btn-quiet btn-sm"
               disabled={!bridge.ready || busy}
               onClick={() =>
-                startWalkthrough(pageTour(store.elements), {
-                  language: detectedLanguage || 'auto',
+                startWalkthrough(pageTour(store.elements, voiceProfile.style), {
+                  language: voiceProfile.style,
                 })
               }
             >
@@ -2310,7 +2422,7 @@ export default function App() {
               walk={walkthrough}
               onNext={() => {
                 player.stop();
-                speakCtrlRef.current?.abort();
+                speechQueue.cancel();
                 setWalkthrough((w) =>
                   w && w.index + 1 < w.targets.length
                     ? { ...w, index: w.index + 1 }
@@ -2319,14 +2431,14 @@ export default function App() {
               }}
               onPrevious={() => {
                 player.stop();
-                speakCtrlRef.current?.abort();
+                speechQueue.cancel();
                 setWalkthrough((w) =>
                   w ? { ...w, index: Math.max(0, w.index - 1) } : w,
                 );
               }}
               onToggle={() => {
                 player.stop();
-                speakCtrlRef.current?.abort();
+                speechQueue.cancel();
                 setWalkthrough((w) => (w ? { ...w, playing: !w.playing } : w));
               }}
               onStop={stopWalkthrough}
@@ -2417,7 +2529,7 @@ export default function App() {
           messages={session.messages}
           pointing={pointing}
           bridge={bridge}
-          detectedLanguage={detectedLanguage}
+          detectedLanguage={voiceProfile.style}
           voiceAvailable={voiceAvailable}
           health={health}
           onTranscript={() => setPanel('transcript')}

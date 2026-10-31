@@ -7,18 +7,27 @@ function versionNumber(session, id) {
 }
 
 export function exportJSON(session, project) {
-  const current = session.versions.find((v) => v.id === session.currentVersionId);
+  const current = session.versions.find(
+    (v) => v.id === session.currentVersionId,
+  );
   const byId = new Map(session.versions.map((v) => [v.id, v]));
   let accepted = current;
-  while (accepted && !['base', 'kept'].includes(accepted.status)) accepted = byId.get(accepted.parentId);
+  while (accepted && !['base', 'kept'].includes(accepted.status))
+    accepted = byId.get(accepted.parentId);
   return JSON.stringify(
     {
       app: 'Common Ground',
       format: 'common-ground-session@1',
       exportedAt: new Date().toISOString(),
+      voiceMetrics: session.voiceMetrics || [],
       project: { id: project.id, name: project.name },
       transcript: session.messages.map((m) => ({
-        role: m.role === 'assistant' ? 'Ground' : m.role === 'user' ? 'You' : 'Note',
+        role:
+          m.role === 'assistant'
+            ? 'Ground'
+            : m.role === 'user'
+              ? 'You'
+              : 'Note',
         at: new Date(m.at).toISOString(),
         via: m.via,
         text: m.content,
@@ -30,7 +39,10 @@ export function exportJSON(session, project) {
       })),
       versions: session.versions.map((v, i) => {
         const parent = v.parentId ? byId.get(v.parentId) : null;
-        const d = parent && v.html && parent.html ? diffLines(stripReviewIds(parent.html), stripReviewIds(v.html)) : null;
+        const d =
+          parent && v.html && parent.html
+            ? diffLines(stripReviewIds(parent.html), stripReviewIds(v.html))
+            : null;
         return {
           number: i + 1,
           id: v.id,
@@ -40,8 +52,26 @@ export function exportJSON(session, project) {
           createdAt: new Date(v.createdAt).toISOString(),
           parent: parent ? versionNumber(session, parent.id) : null,
           changes: v.changes,
-          diff: d ? { added: d.added, removed: d.removed, unified: v.status === 'kept' || v.id === session.currentVersionId ? unifiedText(d) : undefined } : undefined,
-          files: v.sourceChanges?.length ? v.sourceChanges.map((f) => ({ file: f.file, unified: unifiedText(diffLines(f.before, f.after), f.file, f.file) })) : undefined,
+          diff: d
+            ? {
+                added: d.added,
+                removed: d.removed,
+                unified:
+                  v.status === 'kept' || v.id === session.currentVersionId
+                    ? unifiedText(d)
+                    : undefined,
+              }
+            : undefined,
+          files: v.sourceChanges?.length
+            ? v.sourceChanges.map((f) => ({
+                file: f.file,
+                unified: unifiedText(
+                  diffLines(f.before, f.after),
+                  f.file,
+                  f.file,
+                ),
+              }))
+            : undefined,
         };
       }),
       currentVersion: versionNumber(session, session.currentVersionId),
@@ -54,15 +84,31 @@ export function exportJSON(session, project) {
 }
 
 export function exportMarkdown(session, project) {
-  const lines = [`# Common Ground session — ${project.name}`, '', `Exported ${new Date().toLocaleString()}`, ''];
+  const lines = [
+    `# Common Ground session — ${project.name}`,
+    '',
+    `Exported ${new Date().toLocaleString()}`,
+    '',
+  ];
   lines.push('## Conversation', '');
   for (const m of session.messages) {
-    const who = m.role === 'assistant' ? '**Ground**' : m.role === 'user' ? '**You**' : '_Note_';
-    const time = new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const who =
+      m.role === 'assistant'
+        ? '**Ground**'
+        : m.role === 'user'
+          ? '**You**'
+          : '_Note_';
+    const time = new Date(m.at).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
     let line = `- ${who} (${time}${m.via === 'voice' ? ', voice' : ''}${m.scripted ? ', scripted demo' : ''}): ${m.content.replace(/\n+/g, ' ')}`;
-    if (m.ref) line += `\n  - Pointing at: \`${m.ref.id}\`${m.ref.label ? ` — ${m.ref.label}` : ''}${m.ref.locked ? ' (locked)' : ''}`;
-    if (m.targets?.length) line += `\n  - Ground pointed at: ${m.targets.map((t) => `\`${t.id}\`${t.label ? ` (${t.label})` : ''}`).join(', ')}`;
-    if (m.versionId) line += `\n  - Created version v${versionNumber(session, m.versionId)}`;
+    if (m.ref)
+      line += `\n  - Pointing at: \`${m.ref.id}\`${m.ref.label ? ` — ${m.ref.label}` : ''}${m.ref.locked ? ' (locked)' : ''}`;
+    if (m.targets?.length)
+      line += `\n  - Ground pointed at: ${m.targets.map((t) => `\`${t.id}\`${t.label ? ` (${t.label})` : ''}`).join(', ')}`;
+    if (m.versionId)
+      line += `\n  - Created version v${versionNumber(session, m.versionId)}`;
     lines.push(line);
   }
   lines.push('', '## Versions', '');
@@ -70,12 +116,32 @@ export function exportMarkdown(session, project) {
   session.versions.forEach((v, i) => {
     const current = v.id === session.currentVersionId ? ' ← current' : '';
     lines.push(`### v${i + 1} · ${v.summary} (${v.status})${current}`, '');
-    if (v.changes?.length) lines.push(...v.changes.map((c) => `- ${c.description}${c.id ? ` (\`${c.id}\`)` : ''}`), '');
+    if (v.changes?.length)
+      lines.push(
+        ...v.changes.map(
+          (c) => `- ${c.description}${c.id ? ` (\`${c.id}\`)` : ''}`,
+        ),
+        '',
+      );
     const parent = v.parentId ? byId.get(v.parentId) : null;
     if (parent?.html && v.html && v.status !== 'undone') {
-      lines.push('```diff', unifiedText(diffLines(stripReviewIds(parent.html), stripReviewIds(v.html))), '```', '');
+      lines.push(
+        '```diff',
+        unifiedText(
+          diffLines(stripReviewIds(parent.html), stripReviewIds(v.html)),
+        ),
+        '```',
+        '',
+      );
     }
-    for (const f of v.sourceChanges || []) lines.push(`File \`${f.file}\``, '```diff', unifiedText(diffLines(f.before, f.after), f.file, f.file), '```', '');
+    for (const f of v.sourceChanges || [])
+      lines.push(
+        `File \`${f.file}\``,
+        '```diff',
+        unifiedText(diffLines(f.before, f.after), f.file, f.file),
+        '```',
+        '',
+      );
   });
   return lines.join('\n');
 }

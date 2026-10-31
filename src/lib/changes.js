@@ -4,7 +4,7 @@ const normalize = (s) =>
     .trim();
 const label = (e) =>
   normalize(e.label || e.text || e.kind || e.tag).slice(0, 85);
-export function pageTour(elements) {
+export function pageTour(elements, language = 'en-IN') {
   const meaningful = elements.filter(
     (e) => e.id && e.text && ['nav', 'h1', 'h2', 'footer'].includes(e.tag),
   );
@@ -20,10 +20,20 @@ export function pageTour(elements) {
     .map((e) => ({
       id: e.id,
       label: label(e),
-      description: `${e.tag === 'h1' ? 'The main headline' : e.tag === 'nav' ? 'Navigation' : e.tag === 'footer' ? 'The footer' : 'This section'}: ${label(e)}.`,
+      description:
+        language === 'hinglish'
+          ? `ये ${e.tag === 'h1' ? 'main headline' : e.tag === 'nav' ? 'navigation' : e.tag === 'footer' ? 'footer' : 'section'} है — “${label(e)}”.`
+          : language === 'hi-IN'
+            ? `यह ${e.tag === 'h1' ? 'मुख्य शीर्षक' : e.tag === 'nav' ? 'ऊपर की कड़ियाँ' : e.tag === 'footer' ? 'पृष्ठ का अंतिम हिस्सा' : 'हिस्सा'} है — “${label(e)}”।`
+            : `${e.tag === 'h1' ? 'The main headline' : e.tag === 'nav' ? 'Navigation' : e.tag === 'footer' ? 'The footer' : 'This section'}: ${label(e)}.`,
     }));
 }
-export function changedTargets(before, after, requested = []) {
+export function changedTargets(
+  before,
+  after,
+  requested = [],
+  language = 'en-IN',
+) {
   const old = new Map(before.map((e) => [e.id, e]));
   const changed = after.filter((e) => {
     if (
@@ -94,9 +104,38 @@ export function changedTargets(before, after, requested = []) {
       label: label(e),
       description:
         requested.find((c) => c.id === e.id)?.description ||
-        `Updated ${e.kind || e.tag}: ${label(e)}`,
+        changeDescription(old.get(e.id), e, language),
     }));
 }
+function changeDescription(before, after, language) {
+  if (!['hinglish', 'hi-IN'].includes(language))
+    return `Updated ${after.kind || after.tag}: ${label(after)}`;
+  const name =
+    after.tag === 'img'
+      ? 'image'
+      : /^h[1-3]$/.test(after.tag)
+        ? 'heading'
+        : ['button', 'a'].includes(after.tag)
+          ? 'button'
+          : 'section';
+  if (language === 'hi-IN')
+    return `“${label(after)}” ${before ? 'का रूप बदल दिया है' : 'जोड़ दिया है'}।`;
+  if (!before) return `यहाँ ${name} add कर दिया — “${label(after)}”.`;
+  if (normalize(before.text) !== normalize(after.text))
+    return `इस ${name} का text update कर दिया — “${label(after)}”.`;
+  const properties = Object.keys(after.styles || {}).filter(
+    (k) => after.styles[k] !== before.styles?.[k],
+  );
+  const detail = properties.some((k) => /border.?radius/i.test(k))
+    ? 'corners'
+    : properties.some((k) => /color|background/i.test(k))
+      ? 'color'
+      : properties.some((k) => /font.?size|width|height/i.test(k))
+        ? 'size'
+        : 'look';
+  return `इस ${name} का ${detail} update कर दिया.`;
+}
+
 export function comparisonChoice(text) {
   const value = String(text)
     .trim()

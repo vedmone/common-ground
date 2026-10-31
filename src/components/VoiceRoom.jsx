@@ -4,7 +4,7 @@ import CallControls from './CallDock.jsx';
 import { CursorGlyph } from './Logo.jsx';
 import { cx, clip } from '../lib/util.js';
 
-const LANGUAGE_NAMES = { 'en-IN': 'English', 'hi-IN': 'Hindi', 'bn-IN': 'Bengali', 'gu-IN': 'Gujarati', 'kn-IN': 'Kannada', 'ml-IN': 'Malayalam', 'mr-IN': 'Marathi', 'od-IN': 'Odia', 'pa-IN': 'Punjabi', 'ta-IN': 'Tamil', 'te-IN': 'Telugu' };
+const LANGUAGE_NAMES = { hinglish: 'Hindi + English', 'en-IN': 'English', 'hi-IN': 'Hindi', 'bn-IN': 'Bengali', 'gu-IN': 'Gujarati', 'kn-IN': 'Kannada', 'ml-IN': 'Malayalam', 'mr-IN': 'Marathi', 'od-IN': 'Odia', 'pa-IN': 'Punjabi', 'ta-IN': 'Tamil', 'te-IN': 'Telugu' };
 
 /* ---------- small live pieces (each owns its own timer so the room doesn't re-render every second) ---------- */
 
@@ -333,7 +333,7 @@ export default function VoiceRoom({
             'Review call'
           )}
         </span>
-        <span className="lang-chip" title="Ground detects your language on every sentence and answers in it. Switch whenever you like — there is nothing to set.">
+        <span className="lang-chip" title="Ground follows the way you speak, including Hindi-English mix. Short commands keep your conversation’s language.">
           <Languages size={13} aria-hidden="true" />
           <span>{language || 'Your language'}</span>
           <small>{language ? 'detected' : 'auto'}</small>

@@ -67,6 +67,18 @@ export function partialReply(json) {
   }
 }
 
+export function completedReply(json) {
+  const match = String(json).match(/"reply"\s*:\s*"/);
+  if (!match) return null;
+  let escaped = false;
+  for (const c of json.slice(match.index + match[0].length)) {
+    if (c === '"' && !escaped) return partialReply(json);
+    if (c === '\\') escaped = !escaped;
+    else escaped = false;
+  }
+  return null;
+}
+
 export async function serveChat(req, res, run) {
   if (!String(req.headers.accept || '').includes('application/x-ndjson'))
     return res.status(200).json(await run(req.body));
