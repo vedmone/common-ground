@@ -281,3 +281,74 @@ test('create-from-scratch always generates a full page even if intent includes s
     else process.env.SARVAM_API_KEY = originalKey;
   }
 });
+
+test('comparison repairs a missing pair once and builds both options from the original', async () => {
+  const originalFetch = globalThis.fetch,
+    originalKey = process.env.SARVAM_API_KEY;
+  process.env.SARVAM_API_KEY = 'test-key';
+  try {
+    for (const firstAction of ['compare', 'edit']) {
+      let calls = 0;
+      globalThis.fetch = async () => {
+        calls++;
+        const result =
+          calls === 1
+            ? {
+                action: firstAction,
+                reply: 'Two options coming up.',
+                intent: 'Style the heading',
+              }
+            : {
+                action: 'compare',
+                reply: 'Two options coming up.',
+                intent: 'Style the heading',
+                directions: [
+                  {
+                    name: 'Green',
+                    intent: 'Green heading',
+                    patches: [{ id: 'heading', styles: { color: '#123456' } }],
+                  },
+                  {
+                    name: 'Red',
+                    intent: 'Red heading',
+                    patches: [{ id: 'heading', styles: { color: '#aabbcc' } }],
+                  },
+                ],
+              };
+        return Response.json({
+          choices: [
+            {
+              message: { content: JSON.stringify(result) },
+              finish_reason: 'stop',
+            },
+          ],
+        });
+      };
+      const output = await chat({
+        compare: true,
+        messages: [
+          { role: 'user', content: 'Show two colors for this heading.' },
+        ],
+        context: {
+          html: '<!doctype html><html><head><title>Comparison</title></head><body><h1 data-cg-id="heading">Original</h1><p>Preserve this unchanged content in both options.</p></body></html>',
+          elements: [{ id: 'heading', tag: 'h1', text: 'Original' }],
+        },
+      });
+      assert.equal(calls, 2);
+      assert.equal(output.variants.length, 2);
+      assert.ok(output.variants[0].html.includes('#123456'));
+      assert.ok(!output.variants[0].html.includes('#aabbcc'));
+      assert.ok(output.variants[1].html.includes('#aabbcc'));
+      assert.ok(!output.variants[1].html.includes('#123456'));
+      assert.ok(
+        output.variants.every((v) =>
+          v.html.includes('Preserve this unchanged content'),
+        ),
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.SARVAM_API_KEY;
+    else process.env.SARVAM_API_KEY = originalKey;
+  }
+});

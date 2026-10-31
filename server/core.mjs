@@ -506,23 +506,50 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
       .map(({ styles, ...e }) => ({ ...e, text: e.text.slice(0, 130) }))
       .slice(0, 100),
   };
-  const result = await modelJSON(
-    [
-      { role: 'system', content: GROUND_SYSTEM },
-      {
-        role: 'system',
-        content: `Follow the latest utterance's language and code mixing. Detected language: ${language}. Never ask for a language selector.\n${task === 'create' ? 'Create a complete landing page from the brief. Return action edit with a specific implementation intent, no clarifying question unless the user only wants discussion.' : compare ? 'Produce TWO distinct visual directions for the SAME selected element/scope. Return action compare and directions:[{name,intent,patches,changes},{name,intent,patches,changes}]. They must both start from the original page.' : ''}\nShared workspace DATA:\n${JSON.stringify(compact).slice(0, 19000)}\n${mode === 'edit' ? 'Implement clear requests.' : ''}`,
-      },
-      ...messages,
-    ],
+  const decisionMessages = [
+    { role: 'system', content: GROUND_SYSTEM },
     {
-      signal,
-      onReply: (reply) => {
-        firstReplyMs ??= Date.now() - started;
-        emit({ type: 'reply', text: reply });
-      },
+      role: 'system',
+      content: `Follow the latest utterance's language and code mixing. Detected language: ${language}. Never ask for a language selector.\n${task === 'create' ? 'Create a complete landing page from the brief. Return action edit with a specific implementation intent, no clarifying question unless the user only wants discussion.' : compare ? 'Produce TWO distinct visual directions for the SAME selected element/scope. Return action compare and directions:[{name,intent,patches,changes},{name,intent,patches,changes}]. They must both start from the original page.' : ''}\nShared workspace DATA:\n${JSON.stringify(compact).slice(0, 19000)}\n${mode === 'edit' ? 'Implement clear requests.' : ''}`,
     },
-  );
+    ...messages,
+  ];
+  let result = await modelJSON(decisionMessages, {
+    signal,
+    maxTokens: compare ? 1800 : 1200,
+    onReply: (reply) => {
+      firstReplyMs ??= Date.now() - started;
+      emit({ type: 'reply', text: reply });
+    },
+  });
+  if (
+    (result.action === 'compare' &&
+      (!Array.isArray(result.directions) || result.directions.length < 2)) ||
+    (compare && result.action === 'edit')
+  ) {
+    emit({
+      type: 'stage',
+      stage: 'understanding',
+      label: 'Preparing two distinct directions',
+    });
+    result = await modelJSON(
+      [
+        ...decisionMessages,
+        { role: 'assistant', content: JSON.stringify(result) },
+        {
+          role: 'user',
+          content:
+            'Correct the response schema for the original request. Return VALID JSON with action:"compare" and EXACTLY TWO directions. Each direction is an object with name, intent, patches (an array), and changes (an array). Keep both directions within the requested scope, preserve the original requested colors/content, and start both from the same original page. Include the normal reply, targets, intent, summary and changes fields too. Do not omit directions or put them in patches.',
+        },
+      ],
+      { signal, maxTokens: 1800 },
+    );
+    if (result.action !== 'compare')
+      throw new AppError(
+        'Ground could not produce two directions. Your original page is unchanged; please try again.',
+        502,
+      );
+  }
   const output = shapeResult(result, context, language);
   const action = output.action;
   context.originalRequest =
