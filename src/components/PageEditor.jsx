@@ -115,7 +115,7 @@ export default function PageEditor({
           </label>
           <p className="editor-note">
             Leave the brief empty for a fresh canvas, then describe the page to
-            Ground on your voice call.
+            Baat on your voice call.
           </p>
         </>
       ) : (

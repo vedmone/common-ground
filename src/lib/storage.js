@@ -82,7 +82,7 @@ function cleanChanges(list) {
   if (!Array.isArray(list)) return [];
   return list
     .filter((c) => c && typeof c === 'object')
-    .slice(0, 12)
+    .slice(0, 150)
     .map((c) => ({
       id: str(c.id, 120) ? c.id : '',
       description: str(c.description, 400) ? c.description : '',

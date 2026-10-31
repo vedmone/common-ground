@@ -1,10 +1,14 @@
-# Common Ground
+# Baatelier
 
-**Point. Talk. Make it real.** A voice-first shared review room for you and an AI coworker.
+**Talk it into shape.** A voice-first shared review room for you and an AI coworker.
 
 Open the live product at **https://common-ground-studio-six.vercel.app**. Join the voice room, point at an element and speak naturally. No language selector is required.
 
-Common Ground binds a conversation to the interface being discussed. Your cursor shows what you mean; Ground's violet cursor shows what it understood. Discuss a direction, see actual code changes in the preview, then keep, refine, or undo them.
+Baatelier binds a conversation to the interface being discussed. Your cursor shows what you mean; Baat's violet cursor shows what it understood. Discuss a direction, see actual code changes in the preview, then keep, refine, or undo them.
+
+## Identity
+
+Baatelier joins **baat** (conversation) and **atelier** (a maker’s studio). **Baat** is the voice partner. The original B-and-pointer mark, share card and downloadable SVGs live at `/brand.html`. The existing domain, repository, saved browser projects and companion protocol remain compatible.
 
 ## What works
 
@@ -15,7 +19,10 @@ Common Ground binds a conversation to the interface being discussed. Your cursor
 - Follow-up edits wait for the current page and run in order. Explicit cancellation, failure, or reload leaves a resumable original brief and saved follow-ups; status replies report actual phase and elapsed time without inventing an ETA.
 - Two alternative previews from the same base; choose by voice, button, or clicking the preferred element. Only the chosen version enters history.
 - Upload and replace images, ask for image placement and circular/bolder styling, and reuse uploaded assets on the call.
-- Dynamic website tours and change highlights based on actual element inventory and computed-style changes.
+- Guided page tours, explanations of every meaningful element, and change walkthroughs grounded in before/after facts and the recorded task request. The explanation distinguishes a known request from a likely design benefit.
+- Say “explain every element and why”, “what did you change?”, or “explain task 2”. Pause, next, back, repeat and resume work by voice or buttons. Asking a question keeps the tour’s position; a new page version ends the old tour to avoid stale pointing. Each step is prepared independently, with the following step prefetched during narration.
+- Change receipts include all detected meaningful edits and removals, up to the preview’s 150-element inventory, and survive reload. Deleted elements are explained without pointing at a different element.
+- Task cards have Active/Review filters, saved change receipts, Explain changes and explicit Mark reviewed actions. Do next reorders queued work while preserving task numbers. Pause after this task lets the current writer finish before the queue waits. Page creation remains a prerequisite for edits on a blank canvas.
 - Publish a page to `/project/<name>-<unique-suffix>` on the app’s Vercel domain; update the same link with a browser-held ownership key.
 
 - Element hover, selection, parent targeting and reciprocal AI pointing.

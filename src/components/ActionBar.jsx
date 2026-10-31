@@ -21,16 +21,16 @@ export default function ActionBar({ version, index, callActive, onKeep, onUndo, 
       </div>
       <div className="ab-actions">
         {version.changes?.length > 0 && (
-          <button type="button" className="btn btn-quiet btn-sm ab-secondary" onClick={onTour} title="Ground points at each change again">
+          <button type="button" className="btn btn-quiet btn-sm ab-secondary" onClick={onTour} title="Baat points at each change again">
             <Navigation size={14} aria-hidden="true" />
-            <span className="hide-sm">Show me</span>
+            <span className="hide-sm">Explain</span>
           </button>
         )}
         <button type="button" className="btn btn-quiet btn-sm ab-secondary" onClick={onShowChanges} title="See the exact before/after source">
           <GitCompareArrows size={14} aria-hidden="true" />
           <span className="hide-sm">Diff</span>
         </button>
-        <button type="button" className="btn btn-quiet btn-sm" onClick={onRefine} title={callActive ? 'Tell Ground what to adjust' : 'Join the call and tell Ground what to adjust'}>
+        <button type="button" className="btn btn-quiet btn-sm" onClick={onRefine} title={callActive ? 'Tell Baat what to adjust' : 'Join the call and tell Baat what to adjust'}>
           <PenLine size={14} aria-hidden="true" />
           <span>Refine</span>
         </button>

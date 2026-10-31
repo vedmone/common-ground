@@ -89,6 +89,7 @@ test(
     window.localStorage.setItem('commonground:images', JSON.stringify([asset]));
     const page =
       '<!doctype html><html><head><title>Clay House</title></head><body><nav data-cg-id="nav">Clay House · Workshops</nav><main data-cg-id="main"><h1 data-cg-id="hero-heading">Made slowly, by hand.</h1><section data-cg-id="workshops"><h2 data-cg-id="workshop-heading">Our workshops</h2><p data-cg-id="copy">Meet the clay and make something yours.</p><button data-cg-id="cta">Book a workshop</button></section></main><footer data-cg-id="footer">Visit Jaipur</footer></body></html>';
+    const reviewCalls = [];
     const questionCalls = [],
       pendingQuestions = [];
     const calls = [],
@@ -110,8 +111,16 @@ test(
         });
       if (String(url).endsWith('/api/discuss')) {
         const body = JSON.parse(options.body);
+        if (body.review) {
+          reviewCalls.push(body);
+          return Response.json({
+            route: 'answer',
+            reply: `This ${body.context.selection?.tag || 'element'} helps the reader understand the page. Its design follows the recorded request.`,
+            voiceStyle: body.voiceStyle,
+          });
+        }
         questionCalls.push({ body, signal: options.signal });
-        if (body.messages.at(-1).content === 'Why this color?')
+        if (body.messages.at(-1).content.startsWith('Why this color?'))
           return new Promise((resolve) =>
             pendingQuestions.push(() =>
               resolve(
@@ -462,9 +471,32 @@ test(
         'follow-up edits wait for the complete initial page',
       );
       assert.equal(builds[0].aborted, false);
+      const queuedThird = [...document.querySelectorAll('.task-card')].find(
+        (c) => c.querySelector('.task-number').textContent.trim() === '03',
+      );
+      fireEvent.click(queuedThird.querySelector('.task-select'));
+      fireEvent.click(ui.getByRole('button', { name: 'Do task 3 next' }));
+      assert.ok(queuedThird.textContent.includes('Position 1 of 2'));
+      fireEvent.click(
+        ui.getByRole('button', { name: 'Pause after this task' }),
+      );
       await say('what is happening?');
       assert.equal(calls.length, 1);
       await act(async () => builds[0].finish());
+      await waitFor(() =>
+        assert.ok(source().includes('Made slowly, by hand.')),
+      );
+      await waitFor(() =>
+        assert.ok(
+          !document.querySelector('.task-card[data-task-state="running"]'),
+        ),
+      );
+      assert.equal(
+        calls.length,
+        1,
+        'pausing the queue lets the current build finish and holds follow-ups',
+      );
+      fireEvent.click(ui.getByRole('button', { name: 'Continue queue' }));
       await waitFor(() => assert.ok(source().includes('A real workshop page')));
       await waitFor(() =>
         assert.ok(!ui.queryByRole('button', { name: 'Stop processing' })),
@@ -477,7 +509,11 @@ test(
         'each work request has one task card',
       );
       assert.ok(calls[1].context.html.includes('Made slowly, by hand.'));
-      assert.ok(calls[2].context.html.includes('A real workshop page'));
+      assert.ok(calls[2].context.html.includes('Open every Sunday'));
+      assert.ok(
+        calls[1].messages.at(-1).content.includes('Open every Sunday'),
+        'Do next changes execution order without changing task IDs',
+      );
       assert.ok(
         calls
           .slice(1)
@@ -514,6 +550,68 @@ test(
         ui.getByRole('button', { name: 'View result for task 3' }),
       );
       await waitFor(() => assert.ok(source().includes('Open every Sunday')));
+      assert.ok(
+        lastCard.querySelector('.task-receipt').textContent.includes('Updated'),
+      );
+      fireEvent.click(ui.getByRole('button', { name: 'Explain task 3' }));
+      await waitFor(() =>
+        assert.ok(ui.getByRole('region', { name: 'Change walkthrough' })),
+      );
+      await waitFor(() => assert.ok(reviewCalls.length));
+      assert.ok(reviewCalls[0].review.request.includes('Open every Sunday'));
+      await say('pause', false);
+      assert.ok(
+        ui
+          .getByRole('region', { name: 'Change walkthrough' })
+          .textContent.includes('Paused'),
+      );
+      await say('stop tour', false);
+      await waitFor(() =>
+        assert.ok(!ui.queryByRole('region', { name: 'Change walkthrough' })),
+      );
+      fireEvent.click(ui.getByRole('button', { name: 'Mark task 3 reviewed' }));
+      assert.ok(
+        document
+          .querySelector(
+            `[data-task-id="${lastCard.dataset.taskId}"] .task-state`,
+          )
+          .textContent.includes('Reviewed'),
+      );
+      await say(
+        'Explain every single element and why it has been done.',
+        false,
+      );
+      await waitFor(() =>
+        assert.ok(ui.getByRole('region', { name: 'Element explanations' })),
+      );
+      await say('pause', false);
+      const tourRegion = () =>
+        ui.getByRole('region', { name: 'Element explanations' });
+      assert.ok(
+        tourRegion().textContent.includes('of 7'),
+        'the tour includes text and buttons, not only section headings',
+      );
+      await say('next', false);
+      await waitFor(() =>
+        assert.ok(tourRegion().textContent.includes('2 of 7')),
+      );
+      await say('pause', false);
+      const beforeQuestion = calls.length;
+      await say('Which font is this?');
+      assert.equal(calls.length, beforeQuestion);
+      assert.ok(
+        tourRegion().textContent.includes('Paused'),
+        'a question retains the tour position',
+      );
+      await say('continue the tour', false);
+      await waitFor(() =>
+        assert.ok(tourRegion().textContent.includes('2 of 7')),
+      );
+      await say('repeat that', false);
+      await say('stop tour', false);
+      await waitFor(() =>
+        assert.ok(!ui.queryByRole('region', { name: 'Element explanations' })),
+      );
       await say("Okay, I'll wait.");
       assert.equal(
         calls.length,
@@ -558,12 +656,12 @@ test(
       await say('Why this color?', false);
       await waitFor(() => assert.equal(pendingQuestions.length, 2));
       const stopSignal = questionCalls.at(-1).signal;
-      fireEvent.click(ui.getByRole('button', { name: 'Stop Ground' }));
+      fireEvent.click(ui.getByRole('button', { name: 'Stop Baat' }));
       await waitFor(() => assert.ok(stopSignal.aborted));
       assert.equal(
         builds[1].aborted,
         false,
-        'Stop Ground stops the independent answer, not the page build',
+        'Stop Baat stops the independent answer, not the page build',
       );
       await act(async () => pendingQuestions[1]());
       await say('Why this color?', false);

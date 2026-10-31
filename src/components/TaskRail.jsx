@@ -11,6 +11,8 @@ import {
   ArrowUpRight,
   X,
   RotateCcw,
+  AudioLines,
+  ArrowUp,
 } from 'lucide-react';
 const LABELS = {
   queued: 'Next',
@@ -53,23 +55,51 @@ export default function TaskRail({
   onAction,
   onContinue,
   canContinue = true,
+  currentVersionId,
+  onPause,
 }) {
   const [expanded, setExpanded] = useState(false),
-    [selected, setSelected] = useState(null);
+    [selected, setSelected] = useState(null),
+    [filter, setFilter] = useState('all');
   const working = tasks.find((t) => t.state === 'running');
-  const queued = tasks.filter((t) => t.state === 'queued');
-  const actionable = tasks.filter(
-    (t) => !['ready', 'cancelled'].includes(t.state),
+  const queued = tasks
+    .filter((t) => t.state === 'queued')
+    .sort((a, b) => (a.order ?? a.seq) - (b.order ?? b.seq));
+  const reviews = tasks.filter((t) => t.state === 'ready' && !t.reviewedAt);
+  const waiting = tasks.filter((t) =>
+    ['needs_detail', 'needs_choice'].includes(t.state),
   );
+  const actionable = tasks
+    .filter((t) => !['ready', 'cancelled'].includes(t.state))
+    .sort((a, b) => {
+      const rank = (t) =>
+        ['needs_detail', 'needs_choice'].includes(t.state)
+          ? 0
+          : t.state === 'running'
+            ? 1
+            : t.state === 'queued'
+              ? 2
+              : 3;
+      return rank(a) - rank(b) || (a.order ?? a.seq) - (b.order ?? b.seq);
+    });
   const completed = tasks
-    .filter((t) => ['ready', 'cancelled'].includes(t.state))
+    .filter(
+      (t) => (t.state === 'ready' && t.reviewedAt) || t.state === 'cancelled',
+    )
     .slice(-12)
     .reverse();
-  const activeId = selected || working?.id || actionable[0]?.id;
+  const activeId =
+    selected ||
+    working?.id ||
+    waiting[0]?.id ||
+    actionable[0]?.id ||
+    reviews.at(-1)?.id;
   function row(task) {
     const Icon = ICONS[task.state] || Clock3;
     const open = task.id === activeId;
     const version = versions.findIndex((v) => v.id === task.resultVersionId);
+    const result = versions[version];
+    const position = queued.findIndex((t) => t.id === task.id);
     const retryable = ['create', 'edit', 'compare'].includes(task.kind);
     return (
       <li
@@ -98,7 +128,11 @@ export default function TaskRail({
                 ? 'Waiting'
                 : task.state === 'ready' && task.applied === false
                   ? 'Ready to view'
-                  : LABELS[task.state]}
+                  : task.state === 'ready'
+                    ? task.reviewedAt
+                      ? 'Reviewed'
+                      : 'Ready for review'
+                    : LABELS[task.state]}
               {task.state === 'running' && (
                 <Elapsed startedAt={task.startedAt} />
               )}
@@ -109,6 +143,37 @@ export default function TaskRail({
           <div className="task-details">
             <p>{task.request}</p>
             {task.target?.label && <small>On: {task.target.label}</small>}
+            {task.state === 'queued' && (
+              <small>
+                Position {position + 1} of {queued.length}
+                {paused ? ' · queue paused' : ''}
+              </small>
+            )}
+            {task.attempt > 1 && <small>Attempt {task.attempt}</small>}
+            {result && (
+              <div className="task-receipt">
+                <small>
+                  {result.id === currentVersionId
+                    ? 'ON YOUR PAGE'
+                    : 'SAVED RESULT'}{' '}
+                  · v{version + 1}
+                </small>
+                {result.changes?.length > 0 ? (
+                  <ul>
+                    {result.changes.slice(0, 4).map((c, i) => (
+                      <li key={`${c.id}-${i}`}>{c.description || c.id}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>{result.summary}</p>
+                )}
+                {result.changes?.length > 4 && (
+                  <small>
+                    +{result.changes.length - 4} more in the walkthrough
+                  </small>
+                )}
+              </div>
+            )}
             {task.state === 'running' && (
               <small className="task-stage">
                 {turn.label || 'Working on your page'}
@@ -122,6 +187,43 @@ export default function TaskRail({
               <p className="task-error">{task.error}</p>
             )}
             <div className="task-actions">
+              {task.state === 'queued' && position > 0 && (
+                <button
+                  onClick={() => onAction(task, 'next')}
+                  aria-label={`Do task ${task.seq} next`}
+                >
+                  <ArrowUp size={11} />
+                  Do next
+                </button>
+              )}
+              {task.state === 'ready' && result && (
+                <>
+                  <button
+                    className="task-primary"
+                    disabled={busy && result.id !== currentVersionId}
+                    onClick={() => onAction(task, 'explain')}
+                    aria-label={`Explain task ${task.seq}`}
+                    title={
+                      busy && result.id !== currentVersionId
+                        ? 'Available after the current task finishes'
+                        : 'Hear what changed and why'
+                    }
+                  >
+                    <AudioLines size={12} />
+                    Explain changes
+                  </button>
+                  {!task.reviewedAt && (
+                    <button
+                      onClick={() => onAction(task, 'reviewed')}
+                      aria-label={`Mark task ${task.seq} reviewed`}
+                    >
+                      <Check size={11} />
+                      Mark reviewed
+                    </button>
+                  )}
+                </>
+              )}
+
               {task.state === 'running' && (
                 <button
                   onClick={() => onAction(task, 'cancel')}
@@ -216,6 +318,28 @@ export default function TaskRail({
               : 'Every change, in one place'}
         {queued.length > 0 && ` · ${queued.length} next`}
       </p>
+      <div className="task-filters" role="group" aria-label="Filter tasks">
+        {[
+          ['all', 'All', tasks.length],
+          ['active', 'Active', actionable.length],
+          ['review', 'Review', reviews.length],
+        ].map(([id, label, count]) => (
+          <button
+            key={id}
+            aria-pressed={filter === id}
+            onClick={() => setFilter(id)}
+          >
+            {label}
+            <span>{count}</span>
+          </button>
+        ))}
+      </div>
+      {waiting.length > 0 && (
+        <p className="task-attention">
+          {waiting.length} task{waiting.length > 1 ? 's need' : ' needs'} your
+          input.
+        </p>
+      )}
       <div className="task-body">
         {!tasks.length ? (
           <div className="task-empty">
@@ -230,8 +354,26 @@ export default function TaskRail({
           </div>
         ) : (
           <>
-            <ol className="task-list">{actionable.map(row)}</ol>
-            {completed.length > 0 && (
+            {filter !== 'review' && (
+              <ol className="task-list">{actionable.map(row)}</ol>
+            )}
+            {filter !== 'active' && reviews.length > 0 && (
+              <>
+                <h3 className="task-section-label">READY FOR REVIEW</h3>
+                <ol className="task-list">{[...reviews].reverse().map(row)}</ol>
+              </>
+            )}
+            {filter === 'active' && !actionable.length && (
+              <p className="task-filter-empty">
+                No active tasks. Ask for a change on the call.
+              </p>
+            )}
+            {filter === 'review' && !reviews.length && (
+              <p className="task-filter-empty">
+                All caught up. New results will appear here.
+              </p>
+            )}
+            {filter === 'all' && completed.length > 0 && (
               <>
                 <h3 className="task-section-label">RECENTLY FINISHED</h3>
                 <ol className="task-list task-completed">
@@ -241,11 +383,17 @@ export default function TaskRail({
             )}
           </>
         )}
+        {!paused && (working || queued.length > 0) && (
+          <button className="task-pause" onClick={onPause}>
+            {working ? 'Pause after this task' : 'Pause queue'}
+          </button>
+        )}
         {paused && queued.length > 0 && (
           <div className="task-paused">
             <b>Queued work is saved.</b>
             <p>
-              Retry the interrupted task, or continue with your current page.
+              Your current task can finish. Resume when you’re ready for the
+              next change.
             </p>
             <button
               className="btn btn-outline btn-sm"

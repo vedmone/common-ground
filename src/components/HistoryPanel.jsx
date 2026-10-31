@@ -49,7 +49,7 @@ export default function HistoryPanel({ session, onClose, onRestore, onUndo, onSh
                 </div>
                 <div className="tl-meta">
                   <span className={cx('tl-status', `s-${v.status}`)}>{STATUS[v.status]}</span>
-                  <span>{v.origin === 'demo' ? 'Scripted demo' : v.origin === 'companion' ? 'Claude Code' : v.origin === 'sample' ? 'Example' : v.provider || 'Ground'}</span>
+                  <span>{v.origin === 'demo' ? 'Scripted demo' : v.origin === 'companion' ? 'Claude Code' : v.origin === 'sample' ? 'Example' : v.provider || 'Baat'}</span>
                   <span>{relativeTime(v.createdAt)}</span>
                 </div>
                 {v.changes?.length > 0 && (

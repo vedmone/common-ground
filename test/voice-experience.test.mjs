@@ -24,6 +24,7 @@ test('spoken mix follows substantive user words and survives short commands and 
     'इस button को थोड़ा premium और cleaner करो.',
     'Pottery studio ke liye warm colors kyun use karte hain?',
     'Ye fonts aur headings kyun choose kiye?',
+    'Har element kyun banaya hai samjhao.',
   ]) {
     const history = [
       user(text),

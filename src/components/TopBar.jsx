@@ -137,9 +137,9 @@ export default function TopBar({ project, projects, companion, onSwitch, onConne
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <button type="button" className="brand" onClick={onHome} aria-label="Common Ground — show welcome">
+        <button type="button" className="brand" onClick={onHome} aria-label="Baatelier — show welcome">
           <LogoMark />
-          <span>Common Ground</span>
+          <span>Baatelier</span>
         </button>
         <span className="topbar-divider" aria-hidden="true" />
         <ProjectMenu project={project} projects={projects} companion={companion} onSwitch={onSwitch} onConnect={onConnect} />

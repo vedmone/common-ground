@@ -109,6 +109,8 @@ export function cleanTasks(raw, versions = [], work) {
         Number.isSafeInteger(item.seq) && item.seq > 0
           ? item.seq
           : unique.size + 1,
+      order: Number.isFinite(item.order) ? item.order : item.seq,
+      reviewedAt: Number.isFinite(item.reviewedAt) ? item.reviewedAt : 0,
       request: bounded(item.request, 5000),
       title: bounded(item.title, 85) || taskTitle(item.request),
       kind: KINDS.has(item.kind) ? item.kind : 'edit',
@@ -156,16 +158,12 @@ export function nextQueuedTask(tasks, paused, hasPage) {
     )
   )
     return null;
-  const next = tasks
+  const queued = tasks
     .filter((t) => t.state === 'queued')
-    .sort((a, b) => a.seq - b.seq)[0];
-  if (
-    next &&
-    !hasPage &&
-    next.kind !== 'create' &&
-    tasks.some((t) => t.kind === 'create' && t.state !== 'ready')
-  )
-    return null;
+    .sort((a, b) => (a.order ?? a.seq) - (b.order ?? b.seq));
+  const next = queued[0];
+  if (!hasPage && tasks.some((t) => t.kind === 'create' && t.state !== 'ready'))
+    return queued.find((t) => t.kind === 'create') || null;
   return next || null;
 }
 export function inputLane(text) {
@@ -193,8 +191,15 @@ export function isInformationalQuestion(text) {
 export function taskCommand(text) {
   const value = String(text || '')
     .toLowerCase()
+    .replace(/[०-९]/g, (d) => String('०१२३४५६७८९'.indexOf(d)))
     .replace(/[.!?।]/g, '')
     .trim();
+  if (/^(?:please )?pause (?:the )?(?:queue|tasks|task list)$/.test(value))
+    return { action: 'pause' };
+  const next = value.match(/^(?:do )?task (\d+) next(?: karo| करो)?$/);
+  if (next) return { action: 'next', seq: Number(next[1]) };
+  const reviewed = value.match(/^mark task (\d+) (?:as )?reviewed$/);
+  if (reviewed) return { action: 'reviewed', seq: Number(reviewed[1]) };
   if (
     /^(?:please )?(?:continue|resume|start) (?:the )?(?:queue|tasks|task list)$/.test(
       value,

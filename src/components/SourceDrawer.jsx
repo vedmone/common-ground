@@ -152,7 +152,7 @@ export default function SourceDrawer({ session, project, current, onClose, toast
         ) : (
           <div className="panel-empty">
             <h3>No changes yet</h3>
-            <p>This is the original version. When Ground edits the page, the exact before-and-after appears here.</p>
+            <p>This is the original version. When Baat edits the page, the exact before-and-after appears here.</p>
           </div>
         ))}
       {tab === 'source' &&

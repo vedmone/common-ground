@@ -17,4 +17,4 @@ app.all('/api/discuss',discuss);app.all('/api/chat',chat);app.all('/api/speak',s
 app.all('/api/publish',publish);app.get('/project/:id',(req,res)=>site({query:{id:req.params.id}},res));
 const vite=await createViteServer({server:{middlewareMode:true},appType:'spa'});
 app.use(vite.middlewares);
-app.listen(Number(process.env.PORT||4320),'127.0.0.1',()=>console.log('Common Ground → http://127.0.0.1:4320'));
+app.listen(Number(process.env.PORT||4320),'127.0.0.1',()=>console.log('Baatelier → http://127.0.0.1:4320'));

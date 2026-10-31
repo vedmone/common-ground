@@ -252,7 +252,7 @@ test(
           name: 'Open the full transcript and keyboard input',
         }),
       );
-      fireEvent.change(ui.getByRole('textbox', { name: 'Message Ground' }), {
+      fireEvent.change(ui.getByRole('textbox', { name: 'Message Baat' }), {
         target: { value: 'Give this button two directions.' },
       });
       fireEvent.click(ui.getByRole('button', { name: 'Send', exact: true }));
@@ -303,7 +303,7 @@ test(
           name: 'Open the full transcript and keyboard input',
         }),
       );
-      fireEvent.change(ui.getByRole('textbox', { name: 'Message Ground' }), {
+      fireEvent.change(ui.getByRole('textbox', { name: 'Message Baat' }), {
         target: { value: 'Make something different.' },
       });
       fireEvent.click(ui.getByRole('button', { name: 'Send', exact: true }));

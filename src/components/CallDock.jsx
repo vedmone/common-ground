@@ -8,10 +8,10 @@ function statusFor({ call, transcribing, thinking, speaking, handsFree, queued }
   if (call.state === 'hearing') return { label: 'Hearing you…', tone: 'you' };
   if (call.state === 'recording') return { label: 'Recording · tap Send when done', tone: 'you' };
   if (transcribing) return { label: 'Catching what you said…', tone: 'wait' };
-  if (thinking) return { label: queued ? 'Ground will take your next point after this' : 'Ground is working on it', tone: 'wait' };
-  if (speaking) return { label: 'Ground is talking · just speak to interrupt', tone: 'ground' };
+  if (thinking) return { label: queued ? 'Baat will take your next point after this' : 'Baat is working on it', tone: 'wait' };
+  if (speaking) return { label: 'Baat is talking · just speak to interrupt', tone: 'ground' };
   if (!handsFree) return { label: 'Tap Talk, then speak', tone: 'idle' };
-  return { label: 'Just talk · Ground replies when you pause', tone: 'idle' };
+  return { label: 'Just talk · Baat replies when you pause', tone: 'idle' };
 }
 
 /** The mic button carries a live level ring, driven straight from the analyser (no React render per frame). */
@@ -61,14 +61,14 @@ export default function CallControls({ call, controls, handsFree, available, hea
           </button>
           {call.connecting && <button type="button" className="cc-cancel" onClick={controls.end}>Cancel</button>}
           {(thinking || speaking) && (
-            <button type="button" className="cc-stop-round" onClick={onInterrupt} aria-label="Stop Ground" title="Stop Ground (Esc)">
+            <button type="button" className="cc-stop-round" onClick={onInterrupt} aria-label="Stop Baat" title="Stop Baat (Esc)">
               <Square size={14} aria-hidden="true" />
             </button>
           )}
         </div>
         <div className="cc-join-foot">
           <span id="cc-join-note" className={cx('cc-note', reason && 'is-problem')} role={reason ? 'status' : undefined}>
-            {call.connecting ? 'Allow the microphone when your browser asks.' : reason ? clip(reason, 110) : 'Your mic opens hands-free. Ground says hello first.'}
+            {call.connecting ? 'Allow the microphone when your browser asks.' : reason ? clip(reason, 110) : 'Your mic opens hands-free. Baat says hello first.'}
           </span>
           <button type="button" className="cc-type" onClick={onTranscript}>
             <Keyboard size={13} aria-hidden="true" />
@@ -89,7 +89,7 @@ export default function CallControls({ call, controls, handsFree, available, hea
           {status.label}
         </span>
         <div className="seg tiny cc-mode" role="radiogroup" aria-label="Turn taking">
-          <button type="button" role="radio" aria-checked={handsFree} className={cx(handsFree && 'is-on')} onClick={() => controls.setHandsFree(true)} title="Hands-free: Ground replies when you pause">
+          <button type="button" role="radio" aria-checked={handsFree} className={cx(handsFree && 'is-on')} onClick={() => controls.setHandsFree(true)} title="Hands-free: Baat replies when you pause">
             Hands-free
           </button>
           <button type="button" role="radio" aria-checked={!handsFree} className={cx(!handsFree && 'is-on')} onClick={() => controls.setHandsFree(false)} title="Tap to talk: you start and stop each turn">
@@ -137,10 +137,10 @@ export default function CallControls({ call, controls, handsFree, available, hea
           className={cx(call.speakerMuted && 'is-off')}
           onClick={controls.toggleSpeaker}
           aria-pressed={call.speakerMuted}
-          aria-label={call.speakerMuted ? 'Turn Ground’s voice back on' : 'Turn Ground’s voice off (captions only)'}
-          title={call.speakerMuted ? 'Ground’s voice is off — captions only' : 'Ground’s voice is on'}
+          aria-label={call.speakerMuted ? 'Turn Baat’s voice back on' : 'Turn Baat’s voice off (captions only)'}
+          title={call.speakerMuted ? 'Baat’s voice is off — captions only' : 'Baat’s voice is on'}
         />
-        <CtrlButton icon={Square} iconSize={14} label="Stop" className="cc-stop" onClick={onInterrupt} disabled={!busy} aria-label="Stop Ground" title="Stop Ground (Esc)" />
+        <CtrlButton icon={Square} iconSize={14} label="Stop" className="cc-stop" onClick={onInterrupt} disabled={!busy} aria-label="Stop Baat" title="Stop Baat (Esc)" />
         <CtrlButton icon={PhoneOff} label="Leave" className="cc-end" onClick={controls.end} aria-label="Leave the call" title="Leave the call" />
       </div>
     </div>

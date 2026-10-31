@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Check, ChevronRight, X, Pause, Play } from 'lucide-react';
+import {
+  Loader2,
+  Check,
+  ChevronRight,
+  X,
+  Pause,
+  Play,
+  RotateCcw,
+} from 'lucide-react';
 const STEPS = [
   ['understanding', 'Understanding'],
   ['building', 'Building'],
@@ -51,34 +59,69 @@ export default function Processing({ turn, onStop }) {
     </div>
   );
 }
-export function Walkthrough({ walk, onNext, onPrevious, onToggle, onStop }) {
+export function Walkthrough({
+  walk,
+  onNext,
+  onPrevious,
+  onToggle,
+  onRepeat,
+  onStop,
+}) {
   const step = walk.targets[walk.index];
+  const title =
+    walk.mode === 'changes'
+      ? 'Change walkthrough'
+      : walk.mode === 'elements'
+        ? 'Element explanations'
+        : 'Page tour';
   return (
-    <div className="walkthrough-bar">
-      <div>
+    <div className="walkthrough-bar" role="region" aria-label={title}>
+      <div className="walkthrough-copy">
         <small>
-          {walk.mode === 'changes' ? 'CHANGE WALKTHROUGH' : 'WEBSITE TOUR'} ·{' '}
-          {walk.index + 1}/{walk.targets.length}
+          {title} · {walk.index + 1} of {walk.targets.length}
+          {!walk.playing ? ' · Paused' : ''}
         </small>
         <b>{step.label}</b>
-        <p>{step.description}</p>
+        <p aria-live="polite">
+          {walk.error ||
+            (walk.loading
+              ? 'Preparing a spoken explanation…'
+              : walk.narration || step.description)}
+        </p>
+        <span className="walkthrough-hint">
+          Say “next”, “repeat that”, or ask a question. Your page tasks keep
+          running.
+        </span>
       </div>
-      <button onClick={onPrevious} disabled={walk.index === 0}>
-        Back
-      </button>
-      <button
-        className="icon-btn"
-        onClick={onToggle}
-        aria-label={walk.playing ? 'Pause tour' : 'Resume tour'}
-      >
-        {walk.playing ? <Pause size={15} /> : <Play size={15} />}
-      </button>
-      <button className="btn btn-primary btn-sm" onClick={onNext}>
-        {walk.index === walk.targets.length - 1 ? 'Finish' : 'Next'}
-      </button>
-      <button className="icon-btn" onClick={onStop} aria-label="Stop tour">
-        <X size={15} />
-      </button>
+      <div className="walkthrough-controls">
+        <button
+          onClick={onPrevious}
+          disabled={walk.index === 0}
+          aria-label="Previous tour element"
+        >
+          Back
+        </button>
+        <button
+          className="icon-btn"
+          onClick={onToggle}
+          aria-label={walk.playing ? 'Pause tour' : 'Resume tour'}
+        >
+          {walk.playing ? <Pause size={15} /> : <Play size={15} />}
+        </button>
+        <button
+          className="icon-btn"
+          onClick={onRepeat}
+          aria-label={walk.error ? 'Retry explanation' : 'Repeat explanation'}
+        >
+          <RotateCcw size={15} />
+        </button>
+        <button className="btn btn-primary btn-sm" onClick={onNext}>
+          {walk.index === walk.targets.length - 1 ? 'Finish' : 'Next'}
+        </button>
+        <button className="icon-btn" onClick={onStop} aria-label="Stop tour">
+          <X size={15} />
+        </button>
+      </div>
     </div>
   );
 }

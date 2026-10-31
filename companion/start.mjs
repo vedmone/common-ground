@@ -101,7 +101,7 @@ async function localChat(body){
     lastSnapshot=await snapshot();
     editStarted=true;
     if(!lastSnapshot.length && valid.context.html){await writeFile(path.join(project,'index.html'),cleanHTML(valid.context.html));lastSnapshot=await snapshot();}
-    const result=await runClaude(`You are implementing a reversible interface change in a Common Ground review session. Work ONLY inside this project directory: ${project}. Do not access secrets or .env files, delete files, modify git history, install software, run external commands, or contact anyone. The user is editing the local app and authorized this change. Use Read/Edit/Write to implement the following concrete request in the REAL source files. Preserve unrelated behavior.\nREQUEST: ${decision.intent||valid.messages.at(-1).content}\nELEMENT: ${JSON.stringify(valid.context.selection||valid.context.hover)}\nRECENT CONVERSATION: ${JSON.stringify(valid.messages.slice(-6))}\nReturn a concise report of actual files and changes. Do not claim tests ran.\n`);
+    const result=await runClaude(`You are implementing a reversible interface change in a Baatelier review session. Work ONLY inside this project directory: ${project}. Do not access secrets or .env files, delete files, modify git history, install software, run external commands, or contact anyone. The user is editing the local app and authorized this change. Use Read/Edit/Write to implement the following concrete request in the REAL source files. Preserve unrelated behavior.\nREQUEST: ${decision.intent||valid.messages.at(-1).content}\nELEMENT: ${JSON.stringify(valid.context.selection||valid.context.hover)}\nRECENT CONVERSATION: ${JSON.stringify(valid.messages.slice(-6))}\nReturn a concise report of actual files and changes. Do not claim tests ran.\n`);
     const after=await snapshot();
     const changed=after.filter(f=>lastSnapshot.find(b=>b.path===f.path)?.content!==f.content);
     if(!changed.length)throw new AppError('The coding agent did not change any source files. Your project is unchanged.',502);
@@ -142,4 +142,4 @@ app.get(['/', '/index.html'],async(req,res,next)=>{try{res.setHeader('Set-Cookie
 app.use(express.static(path.join(root,'dist')));
 if(preview)app.use((req,res,next)=>{if(req.path.startsWith('/api/'))return next();return previewHandler(req,res);});
 app.use((req,res)=>res.status(404).json({error:'Not found'}));
-app.listen(port,'127.0.0.1',()=>{console.log(`Common Ground companion: http://127.0.0.1:${port}\nProject: ${project}\nPairing token: ${token}\nOnly this local project is in scope. Keep this terminal running.`);});
+app.listen(port,'127.0.0.1',()=>{console.log(`Baatelier companion: http://127.0.0.1:${port}\nProject: ${project}\nPairing token: ${token}\nOnly this local project is in scope. Keep this terminal running.`);});

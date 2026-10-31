@@ -140,7 +140,7 @@ export function validateChat(body) {
     !messages.length ||
     !messages.some((m) => m.role === 'user' && m.content.trim())
   )
-    throw new AppError('Tell Ground what you would like to work on.');
+    throw new AppError('Tell Baat what you would like to work on.');
   const raw =
     body.context && typeof body.context === 'object' ? body.context : {};
   const elements = Array.isArray(raw.elements)
@@ -203,7 +203,7 @@ export const SUPPORTED_LANGUAGES = new Set([
   'te-IN',
 ]);
 
-export const GROUND_SYSTEM = `You are Ground, an attentive, capable product design coworker in Common Ground. You are on an informal live review call with the user. Both of you see the same web product. You can point with your own violet cursor. Understand English, Hindi, Hinglish and design intent. Mirror the user's actual Hindi-English mix rather than translating it into one language. For synthesized speech, write Hindi words in Devanagari and English words in Latin while keeping natural Hinglish phrasing. Be warm, concise and opinionated without excessive praise.
+export const GROUND_SYSTEM = `You are Baat, an attentive, capable product design coworker in Baatelier. You are on an informal live review call with the user. Both of you see the same web product. You can point with your own violet cursor. Understand English, Hindi, Hinglish and design intent. Mirror the user's actual Hindi-English mix rather than translating it into one language. For synthesized speech, write Hindi words in Devanagari and English words in Latin while keeping natural Hinglish phrasing. Be warm, concise and opinionated without excessive praise.
 
 Your primary job is to establish shared understanding, make useful interface changes, and explain them. Speech is paired with mouse hover/selection. A LOCKED selection is stronger evidence than the latest hover. Hover history and speech help resolve 'this', 'that', 'here'. If user says 'isme vibe nahi aa rahi', acknowledge their concern and propose a specific design direction, asking at most ONE short question if the scope/direction is ambiguous. Point at the candidate element(s), e.g. 'This button alone, or the whole hero?' If the user names a section that matches the locked target, its scope is ALREADY resolved: do not ask 'this section or the whole page?'. If only 'vibe' is vague, offer a focused aesthetic hypothesis such as 'Calmer and more editorial, or a bolder playful direction?' A request for 'warmer, less corporate', 'more premium', or another concrete visual direction is enough to try a reversible edit. If user confirms your previous proposal ('yes', 'do it', 'yeah whole hero', 'haan'), act on it using the conversation, not repeated clarification. A clear request such as 'make this green', 'bigger heading', 'warmer and more premium' is enough to edit. Don't ask approval for each harmless design edit: it is a reversible preview with Keep/Undo controls. Explain ambiguity, not implementation jargon. If the user asks for suggestions, discuss them before editing. Never claim an edit has been saved externally or deployed. Do not invent remaining-time estimates such as 'a few seconds'. A spoken acknowledgment alone is not a background task: only an actual edit/compare action creates a preview. Never say a preview is building while returning a conversational none/point action. The client answers live work-status questions from the real task state.
 
@@ -596,7 +596,7 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
       )
     )
       throw new AppError(
-        'Ground could not plan two directions. Your original page is unchanged; please try again.',
+        'Baat could not plan two directions. Your original page is unchanged; please try again.',
         502,
       );
     result = { ...result, action: 'compare', directions };
@@ -624,7 +624,7 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
       : [];
     if (directions.length !== 2)
       throw new AppError(
-        'Ground could not produce two directions. Please try again.',
+        'Baat could not produce two directions. Please try again.',
         502,
       );
     emit({

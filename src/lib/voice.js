@@ -138,7 +138,7 @@ export class VoiceSession {
     this.emitState();
   }
 
-  /** Ground is talking: raise the threshold so echo does not count as speech (barge-in still works). */
+  /** Baat is talking: raise the threshold so echo does not count as speech (barge-in still works). */
   setPlayback(active) {
     this.playbackActive = active;
   }

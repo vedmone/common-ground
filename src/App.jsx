@@ -29,6 +29,7 @@ import TourBanner from './components/TourBanner.jsx';
 import PageEditor from './components/PageEditor.jsx';
 import CompareView from './components/CompareView.jsx';
 import TaskRail from './components/TaskRail.jsx';
+import ReviewMenu from './components/ReviewMenu.jsx';
 import {
   addTask,
   updateTask,
@@ -76,7 +77,19 @@ import {
   describeElement,
 } from './lib/util.js';
 import { loadProjects, saveProjects, blankHTML } from './lib/projects.js';
-import { changedTargets, pageTour, comparisonChoice } from './lib/changes.js';
+import {
+  changedTargets,
+  changeReceipt,
+  pageTour,
+  comparisonChoice,
+} from './lib/changes.js';
+import {
+  reviewCommand,
+  elementTour,
+  changeTour,
+  reviewEvidence,
+  moveTaskNext,
+} from './lib/review.js';
 import {
   classifyWorkUtterance,
   hasPageContent,
@@ -294,6 +307,10 @@ export default function App() {
   const chooseComparisonRef = useRef(null);
   const taskActionRef = useRef(null);
   const walkRef = useRef(null);
+  const reviewCache = useRef(new Map());
+  const reviewController = useRef(null);
+  const walkControlRef = useRef(null);
+  const pendingReview = useRef(null);
   const progressVoiceAt = useRef(0);
   const toastTimers = useRef(new Set());
 
@@ -375,16 +392,22 @@ export default function App() {
       for (const q of discussionJobs.current.values()) q.controller.abort();
       discussionJobs.current.clear();
       speechQueue.cancel();
+      reviewController.current?.abort();
       for (const timer of toastTimers.current) clearTimeout(timer);
       toastTimers.current.clear();
     };
   }, [tour, player]);
   const stopWalkthrough = useCallback(
     ({ preserveSpeech = false } = {}) => {
+      const old = walkRef.current;
       walkRef.current = null;
+      reviewController.current?.abort();
+      reviewController.current = null;
+      reviewCache.current.clear();
       setWalkthrough(null);
       tour.cancel();
-      if (!preserveSpeech) speechQueue.cancel();
+      if (!preserveSpeech && old)
+        speechQueue.cancelOwner({ kind: 'tour', id: old.id });
     },
     [player, tour, speechQueue],
   );
@@ -701,8 +724,8 @@ export default function App() {
       if (!silent && (hadTurn || wasSpeaking))
         note(
           hadTurn
-            ? 'You interrupted Ground. Your latest preview is still available.'
-            : 'Stopped Ground’s voice.',
+            ? 'You interrupted Baat. Your latest preview is still available.'
+            : 'Stopped Baat’s voice.',
           'info',
         );
     },
@@ -770,6 +793,7 @@ export default function App() {
           {
             kind,
             isCurrent,
+            owner: clipOwner,
             beforePlay: async (signal) => {
               while (
                 !signal.aborted &&
@@ -803,6 +827,7 @@ export default function App() {
   );
 
   const stopVoice = useCallback(() => {
+    if (walkRef.current) walkControlRef.current?.('pause');
     lastVoiceCutAt.current = Date.now();
     voiceEpoch.current++;
     speechQueue.cancel();
@@ -811,7 +836,12 @@ export default function App() {
     setDiscussion({ pending: 0, question: '' });
   }, [speechQueue]);
   const stopForeground = useCallback(() => {
-    if (player.playing || speechQueue.busy || discussionJobs.current.size)
+    if (
+      walkRef.current ||
+      player.playing ||
+      speechQueue.busy ||
+      discussionJobs.current.size
+    )
       stopVoice();
     else if (turnRef.current) interrupt({ scope: 'work' });
   }, [player, speechQueue, stopVoice, interrupt]);
@@ -885,82 +915,237 @@ export default function App() {
   const startWalkthrough = useCallback(
     (
       targets,
-      { mode = 'page', language = 'auto', preserveSpeech = false } = {},
+      { mode = 'page', language = 'auto', preserveSpeech = false, taskId } = {},
     ) => {
       stopWalkthrough({ preserveSpeech });
       if (!targets.length) {
-        toast('No visible sections are available for a tour yet.');
+        toast(
+          mode === 'changes'
+            ? 'There are no recorded changes on this version yet.'
+            : 'There are no elements available for a tour yet.',
+        );
         return;
       }
-      setWalkthrough({
+      const L = live.current,
+        version = L.current;
+      const next = {
         id: uid('walk'),
-        targets: targets.slice(0, 7),
+        projectId: L.project.id,
+        versionId: version.id,
+        version,
+        parent: L.session.versions.find((v) => v.id === version.parentId),
+        task: (L.session.tasks || []).find(
+          (t) => t.id === (taskId || version.taskId),
+        ),
+        elements: store.elements.map((e) => ({
+          ...e,
+          styles: { ...e.styles },
+        })),
+        targets: targets.slice(0, 150),
         index: 0,
         playing: true,
         mode,
         language,
-      });
+        loading: true,
+        narration: '',
+        error: '',
+        attempt: 0,
+      };
+      reviewController.current = new AbortController();
+      walkRef.current = next;
+      setWalkthrough(next);
     },
-    [stopWalkthrough, toast],
+    [stopWalkthrough, toast, store],
   );
+  const prepareReviewStep = useCallback((w, index) => {
+    const step = w.targets[index];
+    if (!step)
+      return Promise.reject(
+        new Error('This tour step is no longer available.'),
+      );
+    const key = `${w.id}:${index}:${w.language}`;
+    if (reviewCache.current.has(key)) return reviewCache.current.get(key);
+    const L = live.current,
+      viaCompanion = !L.health.chat && L.companion.status === 'connected';
+    const focus = w.elements.find((e) => e.id === step.id);
+    const review = {
+      ...reviewEvidence(w.version, w.parent, step, w.task),
+      mode: w.mode,
+    };
+    const job = api.discuss(
+      {
+        messages: [
+          {
+            role: 'user',
+            content:
+              w.mode === 'changes'
+                ? 'Explain this recorded change and its purpose.'
+                : 'Explain this element, its role and the design choices visible here.',
+          },
+        ],
+        language: w.language,
+        voiceStyle: w.language,
+        context: {
+          pageTitle: w.version.summary || L.project.name,
+          elements: w.elements,
+          selection: focus || null,
+        },
+        review,
+        tasks: [],
+      },
+      reviewController.current?.signal,
+      viaCompanion ? companionApi.normalizeBase(L.settings.companionUrl) : '',
+      viaCompanion ? L.settings.companionToken : '',
+    );
+    // The next step can be prefetched while the current explanation is spoken.
+    job.catch(() => {});
+    reviewCache.current.set(key, job);
+    return job;
+  }, []);
+  walkControlRef.current = (action) => {
+    const w = walkRef.current;
+    if (!w) return;
+    speechQueue.cancelOwner({ kind: 'tour', id: w.id });
+    tour.cancel();
+    if (action === 'stop') {
+      stopWalkthrough();
+      return;
+    }
+    let next = { ...w, loading: false, error: '' };
+    if (action === 'pause') next.playing = false;
+    if (action === 'resume') {
+      next.playing = true;
+      next.language = live.current.voiceProfile.style;
+    }
+    if (action === 'next') {
+      if (w.index + 1 >= w.targets.length) {
+        stopWalkthrough();
+        return;
+      }
+      next.index++;
+      next.playing = true;
+      next.narration = '';
+    }
+    if (action === 'back') {
+      next.index = Math.max(0, w.index - 1);
+      next.playing = true;
+      next.narration = '';
+    }
+    if (action === 'repeat') {
+      if (w.error)
+        reviewCache.current.delete(`${w.id}:${w.index}:${w.language}`);
+      next.playing = true;
+      next.attempt = (w.attempt || 0) + 1;
+    }
+    walkRef.current = next;
+    setWalkthrough(next);
+  };
   useEffect(() => {
     const w = walkthrough;
     if (!w || !w.playing) return;
     let valid = true,
       timer;
-    const target = w.targets[w.index];
-    const content = target.description || target.label;
-    tour.start([target], {
-      reply: content,
-      tone: w.mode === 'changes' ? 'change' : 'point',
-      expectAudio: call.active && !call.speakerMuted,
-    });
-    const msg = {
-      id: uid('m'),
-      role: 'assistant',
-      content,
-      language: w.language,
-      at: Date.now(),
-      targets: [target],
-      local: true,
+    const isCurrent = () =>
+      valid &&
+      walkRef.current?.id === w.id &&
+      walkRef.current?.index === w.index &&
+      live.current.current.id === w.versionId;
+    const step = w.targets[w.index];
+    const advance = (delay = 350) => {
+      if (isCurrent())
+        timer = setTimeout(() => walkControlRef.current?.('next'), delay);
     };
-    appendMessages(msg);
-    const next = () => {
-      if (valid && walkRef.current?.id === w.id)
-        timer = setTimeout(
-          () =>
-            setWalkthrough((x) =>
-              x?.id === w.id
-                ? x.index + 1 < x.targets.length
-                  ? { ...x, index: x.index + 1 }
-                  : null
-                : x,
-            ),
-          350,
+    (async () => {
+      setWalkthrough((x) =>
+        x?.id === w.id ? { ...x, loading: true, error: '' } : x,
+      );
+      try {
+        const result = await prepareReviewStep(w, w.index);
+        if (!isCurrent()) return;
+        const content = result.reply;
+        setWalkthrough((x) =>
+          x?.id === w.id ? { ...x, loading: false, narration: content } : x,
         );
-    };
-    if (call.active && !call.speakerMuted)
-      speakText(content, {
-        messageId: msg.id,
-        language: w.language,
-        onStart: (d) => tour.syncToAudio(d),
-      }).then((outcome) => {
-        if (outcome === 'stopped' || outcome === 'cancelled') return;
-        next();
-      });
-    else timer = setTimeout(next, Math.max(2200, content.length * 28));
+        if (!result.messageId) {
+          result.messageId = uid('m');
+          appendMessages({
+            id: result.messageId,
+            role: 'assistant',
+            content,
+            language: w.language,
+            at: Date.now(),
+            targets: step.missing ? [] : [step],
+            local: true,
+            lane: 'conversation',
+            taskId: w.task?.id,
+          });
+        }
+        const wantVoice =
+          live.current.call.active && !live.current.call.speakerMuted;
+        if (!step.missing)
+          tour.start([step], {
+            reply: content,
+            tone: w.mode === 'changes' ? 'change' : 'point',
+            expectAudio: wantVoice,
+          });
+        if (w.index + 1 < w.targets.length)
+          prepareReviewStep(w, w.index + 1).catch(() => {});
+        if (wantVoice) {
+          const outcome = await speakText(content, {
+            messageId: result.messageId,
+            language: w.language,
+            owner: { kind: 'tour', id: w.id },
+            isCurrent,
+            onStart: (d) => tour.syncToAudio(d),
+          });
+          if (outcome === 'cancelled' || outcome === 'stopped' || !isCurrent())
+            return;
+          advance(
+            outcome === 'ended' ? 350 : Math.max(2500, content.length * 30),
+          );
+        } else advance(Math.max(3000, content.length * 32));
+      } catch (error) {
+        if (!isCurrent() || isAbort(error)) return;
+        setWalkthrough((x) =>
+          x?.id === w.id
+            ? {
+                ...x,
+                playing: false,
+                loading: false,
+                error:
+                  'The explanation could not load. Retry or skip this element.',
+              }
+            : x,
+        );
+      }
+    })();
     return () => {
       valid = false;
       clearTimeout(timer);
+      speechQueue.cancelOwner({ kind: 'tour', id: w.id });
     };
   }, [
-    walkthrough,
-    appendMessages,
+    walkthrough?.id,
+    walkthrough?.index,
+    walkthrough?.playing,
+    walkthrough?.attempt,
+    walkthrough?.language,
     call.active,
     call.speakerMuted,
+    appendMessages,
+    prepareReviewStep,
     speakText,
     tour,
+    speechQueue,
   ]);
+  useEffect(() => {
+    if (walkRef.current && walkRef.current.versionId !== current.id) {
+      stopWalkthrough();
+      toast(
+        'The preview changed. Start a new walkthrough to review this version.',
+      );
+    }
+  }, [current.id, stopWalkthrough, toast]);
 
   /* ---------- versions: keep / undo / restore ---------- */
   const versionNumber = useCallback(
@@ -1037,6 +1222,9 @@ export default function App() {
         versions: x.versions.map((v) =>
           v.id === cur.id ? { ...v, status: 'kept' } : v,
         ),
+        tasks: updateTask(x.tasks || [], cur.taskId, {
+          reviewedAt: Date.now(),
+        }),
       }));
       toast(`Kept “${clip(cur.summary, 40)}”.`, 'success', 2600);
     },
@@ -1074,6 +1262,79 @@ export default function App() {
     },
     [store, toast, tour],
   );
+
+  const beginReview = useCallback(
+    (mode = 'page', taskId) => {
+      const L = live.current,
+        task = (L.session.tasks || []).find((t) => t.id === taskId);
+      const version = task?.resultVersionId
+        ? L.session.versions.find((v) => v.id === task.resultVersionId)
+        : L.current;
+      if (!version) {
+        toast('That task has no saved page to explain yet.');
+        return;
+      }
+      if (!hasPageContent(version?.html) && L.project.id !== 'companion') {
+        const content =
+          L.voiceProfile.style === 'hinglish'
+            ? 'पहला page ready होते ही उसका tour दे सकता हूँ. Build अभी चलता रहेगा.'
+            : 'I can walk through the page once its first preview is ready. Any active build will keep running.';
+        toast(content);
+        if (L.call.active && !L.call.speakerMuted)
+          speakText(content, { language: L.voiceProfile.style });
+        return;
+      }
+      if (version.id !== L.current.id) {
+        if (turnRef.current) {
+          toast(
+            'That result is saved. Explain it after the current task finishes.',
+          );
+          return;
+        }
+        pendingReview.current = {
+          projectId: L.project.id,
+          versionId: version.id,
+          mode,
+          taskId,
+        };
+        restore(version.id);
+        return;
+      }
+      if (!store.getSnapshot().ready) {
+        pendingReview.current = {
+          projectId: L.project.id,
+          versionId: version.id,
+          mode,
+          taskId,
+        };
+        return;
+      }
+      const targets =
+        mode === 'changes'
+          ? changeTour(version, store.elements)
+          : mode === 'elements'
+            ? elementTour(store.elements)
+            : pageTour(store.elements, L.voiceProfile.style);
+      startWalkthrough(targets, {
+        mode,
+        language: L.voiceProfile.style,
+        taskId,
+      });
+    },
+    [restore, store, startWalkthrough, toast],
+  );
+  useEffect(() => {
+    const pending = pendingReview.current;
+    if (!pending) return;
+    if (pending.projectId !== projectId) {
+      pendingReview.current = null;
+      return;
+    }
+    if (bridge.ready && pending.versionId === current.id) {
+      pendingReview.current = null;
+      beginReview(pending.mode, pending.taskId);
+    }
+  }, [bridge.ready, current.id, projectId, beginReview]);
 
   /* ---------- the conversational turn ---------- */
   const runTurnRef = useRef(null);
@@ -1195,6 +1456,19 @@ export default function App() {
               elements: store.elements,
               pageTitle: store.getSnapshot().title || L.project.name,
             },
+            design: reviewEvidence(
+              L.current,
+              L.session.versions.find((v) => v.id === L.current.parentId),
+              {
+                id: (reference.selection || reference.hover)?.id,
+                description:
+                  L.current.changes?.find(
+                    (c) =>
+                      c.id === (reference.selection || reference.hover)?.id,
+                  )?.description || '',
+              },
+              (L.session.tasks || []).find((t) => t.id === L.current.taskId),
+            ),
             tasks: (L.session.tasks || []).map(({ seq, title, state }) => ({
               seq,
               title,
@@ -1338,8 +1612,22 @@ export default function App() {
         (!executingTask || executingTask.state !== 'queued')
       )
         return;
-      if (walkRef.current) stopWalkthrough();
-      const reference = opts.reference || captureReference();
+      const reviewRequest =
+        !executingTask && reviewCommand(text, !!walkRef.current);
+      if (reviewRequest && reviewRequest.action !== 'start') {
+        if (turnRef.current) turnRef.current.speechInterrupted = false;
+        walkControlRef.current?.(reviewRequest.action);
+        return;
+      }
+      const activeWalk = walkRef.current;
+      if (activeWalk && !reviewRequest) walkControlRef.current?.('pause');
+      let reference = opts.reference || captureReference();
+      if (activeWalk && !reference.selection && !reference.hover) {
+        const e = store.elements.find(
+          (e) => e.id === activeWalk.targets[activeWalk.index]?.id,
+        );
+        if (e) reference = { ...reference, hover: e };
+      }
       const userMsg = {
         id: uid('m'),
         role: 'user',
@@ -1361,11 +1649,24 @@ export default function App() {
         setDetectedLanguage(language);
       }
       if (!executingTask) {
+        if (reviewRequest?.action === 'start') {
+          if (turnRef.current) turnRef.current.speechInterrupted = false;
+          appendMessages({ ...userMsg, lane: 'conversation' });
+          const task = reviewRequest.seq
+            ? (L.session.tasks || []).find((t) => t.seq === reviewRequest.seq)
+            : null;
+          if (reviewRequest.seq && !task) {
+            toast(`Task ${reviewRequest.seq} was not found.`);
+            return;
+          }
+          beginReview(reviewRequest.mode, task?.id);
+          return;
+        }
         const taskControl = taskCommand(text);
         if (taskControl) {
           appendMessages(userMsg);
-          if (taskControl.action === 'continue') {
-            taskActionRef.current?.(null, 'continue');
+          if (['continue', 'pause'].includes(taskControl.action)) {
+            taskActionRef.current?.(null, taskControl.action);
             return;
           }
           const target = (L.session.tasks || []).find(
@@ -1506,15 +1807,6 @@ export default function App() {
             profile,
             userMsg,
           );
-          return;
-        }
-        if (
-          /^(?:please )?(?:give me (?:a |the )?tour|tour (?:the |this )?(?:page|website)|walk me through (?:the |this )?(?:page|website)|(?:page|website) ka tour (?:do|dikhao))[.! ]*$/i.test(
-            text,
-          )
-        ) {
-          appendMessages({ ...userMsg, lane: 'conversation' });
-          startWalkthrough(pageTour(store.elements, language), { language });
           return;
         }
         if (
@@ -1672,10 +1964,10 @@ export default function App() {
             at: Date.now(),
             content:
               L.project.id === 'companion'
-                ? 'The companion is not connected, so Ground cannot reach your project. Open Setup to connect it.'
+                ? 'The companion is not connected, so Baat cannot reach your project. Open Setup to connect it.'
                 : L.health.status === 'error'
-                  ? `Ground can’t reach the server: ${L.health.message} Your page is unchanged.`
-                  : 'Ground’s AI is not configured on this server yet (missing provider key). You can still explore, undo, and run the scripted demo.',
+                  ? `Baat can’t reach the server: ${L.health.message} Your page is unchanged.`
+                  : 'Baat’s AI is not configured on this server yet (missing provider key). You can still explore, undo, and run the scripted demo.',
           });
           return;
         }
@@ -2277,7 +2569,7 @@ export default function App() {
         }
       } else {
         editError =
-          'Ground described an edit but no page was returned. Your current version is unchanged.';
+          'Baat described an edit but no page was returned. Your current version is unchanged.';
       }
     }
 
@@ -2303,10 +2595,12 @@ export default function App() {
         : action === 'point' || action === 'clarify'
           ? rawTargets
           : rawTargets.slice(0, 2);
-    const measured =
+    const receipt =
       versionId && applied
-        ? changedTargets(beforeElements, elements, changes, language)
-        : [];
+        ? changeReceipt(beforeElements, elements, changes, language)
+        : changes;
+    const measured =
+      versionId && applied ? receipt.filter((t) => !t.removed).slice(0, 6) : [];
     const targets = versionId
       ? measured.length
         ? measured
@@ -2343,7 +2637,7 @@ export default function App() {
           v.id === versionId
             ? {
                 ...v,
-                changes: targets.map((t) => ({
+                changes: receipt.map((t) => ({
                   id: t.id,
                   description: t.description || t.label,
                 })),
@@ -2380,7 +2674,7 @@ export default function App() {
     if (targets.length && !wantVoice)
       tour.start(targets, { reply: completion, tone, expectAudio: false });
     if (wantVoice && (versionId || completion !== earlyReply)) {
-      // Speech runs outside the turn so the conversation is free while Ground talks (barge-in works).
+      // Speech runs outside the turn so the conversation is free while Baat talks (barge-in works).
       speakText(completion, {
         messageId: msg.id,
         language,
@@ -2514,7 +2808,7 @@ export default function App() {
         )
           lastVoiceCutAt.current = Date.now();
         if (turnRef.current) turnRef.current.speechInterrupted = true;
-        if (walkRef.current) stopWalkthrough();
+        if (walkRef.current) walkControlRef.current?.('pause');
         speechQueue.cancel();
         player.setVolume(1);
       },
@@ -2560,7 +2854,7 @@ export default function App() {
         error: '',
       });
       const greeting =
-        'Hi, I’m Ground. Point at something and tell me what you’d like to change. Speak in whichever language feels natural.';
+        'Hi, I’m Baat. Point at something and tell me what you’d like to change. Speak in whichever language feels natural.';
       const greetingId = uid('m');
       appendMessages({
         id: greetingId,
@@ -2733,7 +3027,7 @@ export default function App() {
       id: uid('custom'),
       name: (name || 'Untitled page').slice(0, 70),
       kind: 'Your HTML landing page',
-      description: 'Created in Common Ground',
+      description: 'Created in Baatelier',
       html: clean,
       swatch: ['#f3f1eb', '#46664e', '#6f5cd3'],
       suggestions: ['Describe the page you want to build.'],
@@ -2789,14 +3083,15 @@ export default function App() {
     commitVersion(v);
     await store.waitForReady(generation, 6000);
     if (live.current.current.id !== v.id) return;
-    const targets = changedTargets(before, store.elements);
+    const receipt = changeReceipt(before, store.elements);
+    const targets = receipt.filter((t) => !t.removed).slice(0, 6);
     setSession((s) => ({
       ...s,
       versions: s.versions.map((x) =>
         x.id === v.id
           ? {
               ...x,
-              changes: targets.map((t) => ({
+              changes: receipt.map((t) => ({
                 id: t.id,
                 description: t.description,
               })),
@@ -2882,7 +3177,7 @@ export default function App() {
       origin: 'ai',
       changes: choice.changes || [],
       sourceChanges: [],
-      provider: 'Ground',
+      provider: 'Baat',
     };
     const activate = live.current.current.id === c.parent.id;
     commitVersion(v, { activate });
@@ -2898,21 +3193,22 @@ export default function App() {
       setTurn({ phase: 'idle', startedAt: 0 });
       return;
     }
-    const targets = activate
-      ? changedTargets(
+    const receipt = activate
+      ? changeReceipt(
           c.beforeElements,
           store.elements,
           choice.changes || [],
           c.language,
         )
-      : [];
+      : choice.changes || [];
+    const targets = receipt.filter((t) => !t.removed).slice(0, 6);
     setSession((s) => ({
       ...s,
       versions: s.versions.map((x) =>
         x.id === v.id
           ? {
               ...x,
-              changes: targets.map((t) => ({
+              changes: receipt.map((t) => ({
                 id: t.id,
                 description: t.description,
               })),
@@ -2955,11 +3251,37 @@ export default function App() {
   };
 
   taskActionRef.current = (task, action) => {
+    if (action === 'pause') {
+      setSession((s) => ({ ...s, queuePaused: true }));
+      return;
+    }
+    if (action === 'next') {
+      setSession((s) => ({
+        ...s,
+        tasks: moveTaskNext(s.tasks || [], task.id),
+      }));
+      return;
+    }
+    if (action === 'explain') {
+      beginReview('changes', task.id);
+      return;
+    }
+    if (action === 'reviewed') {
+      if (task.resultVersionId) keep(task.resultVersionId);
+      return;
+    }
     if (action === 'continue') {
-      const L = live.current,
-        first = (L.session.tasks || []).find((t) => t.state === 'queued');
-      if (!hasPageContent(L.current.html) && first && first.kind !== 'create') {
-        toast('Retry the page build before continuing its changes.');
+      const L = live.current;
+      if (
+        !nextQueuedTask(
+          L.session.tasks || [],
+          false,
+          hasPageContent(L.current.html) || L.project.id === 'companion',
+        )
+      ) {
+        toast(
+          'Answer the waiting task or retry the page build before continuing.',
+        );
         return;
       }
       setSession((s) => ({ ...s, queuePaused: false }));
@@ -3361,12 +3683,15 @@ export default function App() {
           versions={session.versions}
           onAction={(task, action) => taskActionRef.current?.(task, action)}
           canContinue={
-            hasPageContent(current.html) ||
-            isCompanion ||
-            (session.tasks || []).find((t) => t.state === 'queued')?.kind ===
-              'create'
+            !!nextQueuedTask(
+              session.tasks || [],
+              false,
+              hasPageContent(current.html) || isCompanion,
+            )
           }
           onContinue={() => taskActionRef.current?.(null, 'continue')}
+          onPause={() => taskActionRef.current?.(null, 'pause')}
+          currentVersionId={current.id}
         />
         <section className="stage-col" aria-label="Shared preview">
           <div className="workspace-tools">
@@ -3414,18 +3739,11 @@ export default function App() {
               <Columns2 size={14} />
               Two directions
             </button>
-            <button
-              className="btn btn-quiet btn-sm"
-              disabled={!bridge.ready || busy}
-              onClick={() =>
-                startWalkthrough(pageTour(store.elements, voiceProfile.style), {
-                  language: voiceProfile.style,
-                })
-              }
-            >
-              <Navigation size={14} />
-              Tour page
-            </button>
+            <ReviewMenu
+              disabled={!bridge.ready}
+              hasChanges={!!current.changes?.length}
+              onReview={beginReview}
+            />
             <button
               className="btn btn-quiet btn-sm"
               disabled={isCompanion || busy || !!comparison}
@@ -3446,28 +3764,15 @@ export default function App() {
           {walkthrough && (
             <Walkthrough
               walk={walkthrough}
-              onNext={() => {
-                player.stop();
-                speechQueue.cancel();
-                setWalkthrough((w) =>
-                  w && w.index + 1 < w.targets.length
-                    ? { ...w, index: w.index + 1 }
-                    : null,
-                );
-              }}
-              onPrevious={() => {
-                player.stop();
-                speechQueue.cancel();
-                setWalkthrough((w) =>
-                  w ? { ...w, index: Math.max(0, w.index - 1) } : w,
-                );
-              }}
-              onToggle={() => {
-                player.stop();
-                speechQueue.cancel();
-                setWalkthrough((w) => (w ? { ...w, playing: !w.playing } : w));
-              }}
-              onStop={stopWalkthrough}
+              onNext={() => walkControlRef.current?.('next')}
+              onPrevious={() => walkControlRef.current?.('back')}
+              onToggle={() =>
+                walkControlRef.current?.(
+                  walkthrough.playing ? 'pause' : 'resume',
+                )
+              }
+              onRepeat={() => walkControlRef.current?.('repeat')}
+              onStop={() => walkControlRef.current?.('stop')}
             />
           )}
           {demo && (
@@ -3507,25 +3812,11 @@ export default function App() {
                 onUndo={() => undo()}
                 onRefine={() => {
                   if (call.active)
-                    toast('Tell Ground what you’d like to refine.');
+                    toast('Tell Baat what you’d like to refine.');
                   else startCall();
                 }}
                 onShowChanges={() => setPanel('source')}
-                onTour={() => {
-                  const t = resolveTargets(
-                    pending.changes.map((c) => ({
-                      id: c.id,
-                      label: clip(c.description, 42),
-                    })),
-                    store.elements,
-                  );
-                  if (t.length) pointAt(t, 'change');
-                  else
-                    toast(
-                      'Ground could not find the changed elements on the page.',
-                      'info',
-                    );
-                }}
+                onTour={() => beginReview('changes')}
               />
             )}
           </PreviewStage>
@@ -3661,7 +3952,7 @@ export default function App() {
             setAssets((a) => [...a, asset].slice(-24));
             setSelectedAsset(asset.id);
             toast(
-              'Image uploaded. Select a spot and ask Ground to place it.',
+              'Image uploaded. Select a spot and ask Baat to place it.',
               'success',
             );
           }}
@@ -3721,7 +4012,7 @@ export default function App() {
       <Toasts toasts={toasts} onDismiss={dismissToast} />
       <div className="sr-only" aria-live="polite">
         {pointing?.target
-          ? `Ground is pointing at ${describeElement({ kind: pointing.target.kind, label: pointing.target.label })}`
+          ? `Baat is pointing at ${describeElement({ kind: pointing.target.kind, label: pointing.target.label })}`
           : ''}
       </div>
     </div>

@@ -1,4 +1,4 @@
-/* Common Ground preview bridge.
+/* Baatelier preview bridge.
  * Runs inside the sandboxed preview document. It gives useful elements a stable data-cg-id, draws
  * the "You" hover/selection outlines and the "Ground" pointer, and talks to the review room
  * exclusively through postMessage. It never reads anything from the parent window.

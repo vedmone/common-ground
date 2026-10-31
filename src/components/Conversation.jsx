@@ -30,7 +30,7 @@ function Presence({ turn, transcribing, callActive, speaking }) {
         G
       </span>
       <div className="presence-text">
-        <b>Ground</b>
+        <b>Baat</b>
         <span aria-live="polite">{label}</span>
       </div>
     </div>
@@ -130,7 +130,7 @@ const Message = memo(function Message({ m, versionLabel, versionStatus, speaking
   return (
     <li className={cx('msg', mine ? 'you' : 'ground')}>
       <div className="msg-meta">
-        <span className="msg-who">{mine ? 'You' : 'Ground'}</span>
+        <span className="msg-who">{mine ? 'You' : 'Baat'}</span>
         {m.via === 'voice' && (
           <span className="msg-via" title="Spoken">
             <Mic size={11} aria-label="spoken" />
@@ -212,7 +212,7 @@ function EmptyState({ project, chatAvailable, health, isCompanion, companion, on
       <p>Hover the preview while you talk or type. Click to lock an element so “this” always means exactly that.</p>
       {!chatAvailable && !isCompanion && (
         <div className="callout warn" role="note">
-          {health.status === 'checking' ? 'Checking which AI services this server offers…' : health.status === 'error' ? `The server is unreachable: ${health.message}` : 'This server has no AI provider key configured, so Ground can’t reply yet. The scripted demo and local undo still work.'}
+          {health.status === 'checking' ? 'Checking which AI services this server offers…' : health.status === 'error' ? `The server is unreachable: ${health.message}` : 'This server has no AI provider key configured, so Baat can’t reply yet. The scripted demo and local undo still work.'}
         </div>
       )}
       {isCompanion && companion.status !== 'connected' && (
@@ -322,8 +322,8 @@ function Composer({ onSend, onInterrupt, busy, chatAvailable, bridge, onClearSel
           rows={1}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={chatAvailable ? 'Tell Ground what to change… (try “make this warmer”)' : 'Ground is unavailable. Type “undo” to revert locally.'}
-          aria-label="Message Ground"
+          placeholder={chatAvailable ? 'Tell Baat what to change… (try “make this warmer”)' : 'Baat is unavailable. Type “undo” to revert locally.'}
+          aria-label="Message Baat"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -332,7 +332,7 @@ function Composer({ onSend, onInterrupt, busy, chatAvailable, bridge, onClearSel
           }}
         />
         {busy && !text.trim() ? (
-          <button type="submit" className="send-btn stop" aria-label="Stop Ground">
+          <button type="submit" className="send-btn stop" aria-label="Stop Baat">
             <Square size={13} />
           </button>
         ) : (
@@ -343,10 +343,10 @@ function Composer({ onSend, onInterrupt, busy, chatAvailable, bridge, onClearSel
       </div>
       <div className="composer-foot">
         <div className="seg tiny" role="radiogroup" aria-label="Intent">
-          <button type="button" role="radio" aria-checked={settings.mode === 'discuss'} className={cx(settings.mode === 'discuss' && 'is-on')} onClick={() => updateSettings({ mode: 'discuss' })} title="Ground discusses first and edits when the request is clear">
+          <button type="button" role="radio" aria-checked={settings.mode === 'discuss'} className={cx(settings.mode === 'discuss' && 'is-on')} onClick={() => updateSettings({ mode: 'discuss' })} title="Baat discusses first and edits when the request is clear">
             Discuss
           </button>
-          <button type="button" role="radio" aria-checked={settings.mode === 'edit'} className={cx(settings.mode === 'edit' && 'is-on')} onClick={() => updateSettings({ mode: 'edit' })} title="Ground implements clear requests straight away">
+          <button type="button" role="radio" aria-checked={settings.mode === 'edit'} className={cx(settings.mode === 'edit' && 'is-on')} onClick={() => updateSettings({ mode: 'edit' })} title="Baat implements clear requests straight away">
             Edit
           </button>
         </div>
@@ -371,7 +371,7 @@ function Thinking({ turn, transcribing }) {
     };
   }, [turn.phase, turn.startedAt]);
   if (turn.phase === 'idle' && !transcribing) return null;
-  const label = transcribing && turn.phase === 'idle' ? 'Transcribing your voice…' : turn.phase === 'applying' ? 'Loading the new version into the preview…' : elapsed > 8 ? `Still working (${elapsed}s). Page edits can take up to a minute.` : 'Ground is thinking…';
+  const label = transcribing && turn.phase === 'idle' ? 'Transcribing your voice…' : turn.phase === 'applying' ? 'Loading the new version into the preview…' : elapsed > 8 ? `Still working (${elapsed}s). Page edits can take up to a minute.` : 'Baat is thinking…';
   return (
     <li className="msg ground thinking" aria-live="polite">
       <div className="msg-bubble">
@@ -400,7 +400,7 @@ export default function Conversation(props) {
   }, [messages.length, turn.phase, transcribing]);
 
   return (
-    <aside className="convo" aria-label="Conversation with Ground">
+    <aside className="convo" aria-label="Conversation with Baat">
       <header className="convo-head">
         <Presence turn={turn} transcribing={transcribing} callActive={callActive} speaking={!!speakingMessageId} />
         <SessionMenu session={session} project={project} onReset={onReset} />

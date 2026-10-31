@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Languages, MessageSquareText, Volume2, VolumeX, Lock, X, RotateCcw, MicOff, Mic } from 'lucide-react';
 import CallControls from './CallDock.jsx';
-import { CursorGlyph } from './Logo.jsx';
+import { CursorGlyph, LogoMark } from './Logo.jsx';
 import { cx, clip } from '../lib/util.js';
 
 const LANGUAGE_NAMES = { hinglish: 'Hindi + English', 'en-IN': 'English', 'hi-IN': 'Hindi', 'bn-IN': 'Bengali', 'gu-IN': 'Gujarati', 'kn-IN': 'Kannada', 'ml-IN': 'Malayalam', 'mr-IN': 'Marathi', 'od-IN': 'Odia', 'pa-IN': 'Punjabi', 'ta-IN': 'Tamil', 'te-IN': 'Telugu' };
@@ -76,17 +76,17 @@ function groundState({ call, turn, transcribing, speaking, voiceAvailable, healt
   return { key: 'ready', label: 'Ready when you are' };
 }
 
-function GroundTile({ state, pointing }) {
+function BaatTile({ state, pointing }) {
   const tone = pointing?.tone;
   return (
     <div className={cx('tile-ground', `is-${state.key}`)}>
       <div className="g-avatar" aria-hidden="true">
         <span className="g-ring" />
-        <span className="g-face">G</span>
+        <span className="g-face"><LogoMark size={43}/></span>
       </div>
       <div className="g-text">
         <div className="g-name">
-          <b>Ground</b>
+          <b>Baat</b>
           {state.key === 'speaking' && (
             <span className="g-eq" aria-hidden="true">
               <i />
@@ -159,7 +159,7 @@ function captionItems(messages) {
   return [...(lastUser >= 0 ? [messages[lastUser]] : []), ...after.slice(-3)];
 }
 
-const EXAMPLES = ['“Isme vibe nahi aa rahi.”', '“Can this feel a bit warmer?”', '“Not that one — the button below.”'];
+const EXAMPLES = ['“Isme vibe nahi aa rahi.”', '“Explain every element and why.”', '“Walk me through the changes.”'];
 
 function Captions({ messages, turn, transcribing, call, voiceAvailable, speakingMessageId, onListen, onRetry, onPointTargets, onSelectRef }) {
   const items = captionItems(messages);
@@ -223,7 +223,7 @@ function Captions({ messages, turn, transcribing, call, voiceAvailable, speaking
         return (
           <div key={m.id} className={cx('cap cap-ground', m.action === 'clarify' && 'is-clarify')}>
             <span className="cap-who">
-              Ground
+              Baat
               {m.scripted && <small className="cap-tag">Guided demo · scripted</small>}
               {voiceAvailable && !m.scripted && (
                 <button type="button" className="cap-listen" onClick={() => onListen(m)} aria-label={playing ? 'Stop reading this reply' : 'Hear this reply again'} title={playing ? 'Stop' : 'Hear it again'}>
@@ -270,7 +270,7 @@ function Captions({ messages, turn, transcribing, call, voiceAvailable, speaking
       )}
       {turn.phase !== 'idle' && (
         <div className="cap cap-ground is-pending">
-          <span className="cap-who">Ground</span>
+          <span className="cap-who">Baat</span>
           <p className="cap-wait">
             <span className="dots" aria-hidden="true">
               <i />
@@ -321,7 +321,7 @@ export default function VoiceRoom({
   const live = call.active;
 
   return (
-    <aside className={cx('voice-room', live && 'is-live')} aria-label="Voice call with Ground">
+    <aside className={cx('voice-room', live && 'is-live')} aria-label="Voice call with Baat">
       <header className="room-head">
         <span className={cx('room-live', live && 'is-on')}>
           <span className="room-live-dot" aria-hidden="true" />
@@ -335,7 +335,7 @@ export default function VoiceRoom({
             'Review call'
           )}
         </span>
-        <span className="lang-chip" title="Ground follows the way you speak, including Hindi-English mix. Short commands keep your conversation’s language.">
+        <span className="lang-chip" title="Baat follows the way you speak, including Hindi-English mix. Short commands keep your conversation’s language.">
           <Languages size={13} aria-hidden="true" />
           <span>{language || 'Your language'}</span>
           <small>{language ? 'detected' : 'auto'}</small>
@@ -348,7 +348,7 @@ export default function VoiceRoom({
 
       {discussion?.pending>0&&<div className="discussion-status" role="status">Answering your question{thinking?' · your task keeps running':''}</div>}
       <div className="room-people">
-        <GroundTile state={gState} pointing={pointing} />
+        <BaatTile state={gState} pointing={pointing} />
         <SelfView call={call} handsFree={handsFree} controls={controls} reference={reference} locked={!!bridge.selection} onClearSelection={onClearSelection} />
       </div>
 

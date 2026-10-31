@@ -69,7 +69,7 @@ export default function SetupPanel({ settings, updateSettings, companion, onConn
 
         <ol className="setup-steps">
           <li>
-            <b>Get the companion</b> once. Download or clone the <a href="https://github.com/vedmone/common-ground" target="_blank" rel="noreferrer">Common Ground source</a>, then install it:
+            <b>Get the companion</b> once. Download or clone the <a href="https://github.com/vedmone/common-ground" target="_blank" rel="noreferrer">Baatelier source</a>, then install it:
             <Cmd>{'git clone https://github.com/vedmone/common-ground.git\ncd common-ground\nnpm install\nnpm run build'}</Cmd>
             <small>Set SARVAM_API_KEY in the companion terminal for conversation and voice. The hosted studio already has its own voice connection.</small>
           </li>
@@ -77,7 +77,7 @@ export default function SetupPanel({ settings, updateSettings, companion, onConn
             <b>Start your app’s dev server</b> as usual (for example on port 5173).
           </li>
           <li>
-            <b>Run the companion</b> from the Common Ground folder, pointing it at your project:
+            <b>Run the companion</b> from the Baatelier folder, pointing it at your project:
             <Cmd>npm run companion -- --project ~/code/my-app --preview http://localhost:5173</Cmd>
             <small>Without --preview it serves the project’s index.html directly. Claude Code must be installed and signed in for edits.</small>
           </li>

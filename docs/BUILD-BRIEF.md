@@ -1,4 +1,4 @@
-# Common Ground
+# Baatelier
 
 Build a complete working voice + visual AI review room. Primary promise: the user hovers over a real interface and speaks; the AI visibly points back, resolves ambiguity, proposes and performs a change, shows the result and supports accept/undo. This is a reciprocal conversation.
 

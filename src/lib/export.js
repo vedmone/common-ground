@@ -16,7 +16,7 @@ export function exportJSON(session, project) {
     accepted = byId.get(accepted.parentId);
   return JSON.stringify(
     {
-      app: 'Common Ground',
+      app: 'Baatelier',
       format: 'common-ground-session@1',
       exportedAt: new Date().toISOString(),
       voiceMetrics: session.voiceMetrics || [],
@@ -25,7 +25,7 @@ export function exportJSON(session, project) {
       transcript: session.messages.map((m) => ({
         role:
           m.role === 'assistant'
-            ? 'Ground'
+            ? 'Baat'
             : m.role === 'user'
               ? 'You'
               : 'Note',
@@ -88,7 +88,7 @@ export function exportJSON(session, project) {
 
 export function exportMarkdown(session, project) {
   const lines = [
-    `# Common Ground session — ${project.name}`,
+    `# Baatelier session — ${project.name}`,
     '',
     `Exported ${new Date().toLocaleString()}`,
     '',
@@ -97,7 +97,7 @@ export function exportMarkdown(session, project) {
   for (const m of session.messages) {
     const who =
       m.role === 'assistant'
-        ? '**Ground**'
+        ? '**Baat**'
         : m.role === 'user'
           ? '**You**'
           : '_Note_';
@@ -109,7 +109,7 @@ export function exportMarkdown(session, project) {
     if (m.ref)
       line += `\n  - Pointing at: \`${m.ref.id}\`${m.ref.label ? ` — ${m.ref.label}` : ''}${m.ref.locked ? ' (locked)' : ''}`;
     if (m.targets?.length)
-      line += `\n  - Ground pointed at: ${m.targets.map((t) => `\`${t.id}\`${t.label ? ` (${t.label})` : ''}`).join(', ')}`;
+      line += `\n  - Baat pointed at: ${m.targets.map((t) => `\`${t.id}\`${t.label ? ` (${t.label})` : ''}`).join(', ')}`;
     if (m.versionId)
       line += `\n  - Created version v${versionNumber(session, m.versionId)}`;
     lines.push(line);

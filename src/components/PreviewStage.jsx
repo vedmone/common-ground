@@ -223,7 +223,7 @@ function CompanionEmpty({ companion, onOpenSetup }) {
     <div className="frame-empty companion-empty">
       <div className="empty-icon">{error ? <AlertTriangle size={22} /> : <Plug size={22} />}</div>
       <h3>{companion.status === 'connecting' ? 'Connecting to your companion…' : error ? 'The companion is not reachable' : 'Your project is not connected'}</h3>
-      <p>{error ? companion.error : 'Run the Common Ground companion next to your project, then pair this studio with the token it prints. Nothing is shown here until a real connection is confirmed.'}</p>
+      <p>{error ? companion.error : 'Run the Baatelier companion next to your project, then pair this studio with the token it prints. Nothing is shown here until a real connection is confirmed.'}</p>
       <button type="button" className="btn btn-primary" onClick={onOpenSetup}>
         Open setup
       </button>

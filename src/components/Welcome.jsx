@@ -19,23 +19,23 @@ export default function Welcome({ onEnter, onDemo }) {
         <header className="welcome-top">
           <span className="brand static">
             <LogoMark />
-            <span>Common Ground</span>
+            <span>Baatelier</span>
           </span>
-          <span className="welcome-kicker">A live review room for you and AI</span>
+          <span className="welcome-kicker">Your ideas, in conversation</span>
         </header>
 
         <div className="welcome-grid">
           <div className="welcome-copy">
-            <p className="eyebrow">Point · Talk · Change</p>
+            <p className="eyebrow">A studio you can talk to</p>
             <h1 id="welcome-title">
-              Point at it.
+              A little conversation.
               <br />
-              Say it out loud.
+              A clear direction.
               <br />
-              <em>Watch it change.</em>
+              <em>Something real.</em>
             </h1>
             <p className="welcome-lede">
-              Common Ground puts you and <strong>Ground</strong>, your AI design partner, on the same live page. Hover anything and talk like you would to a colleague. Ground points back
+              Baatelier puts you and <strong>Baat</strong>, your AI design partner, on the same live page. Hover anything and talk like you would to a colleague. Baat points back
               when “this” is unclear, makes the change, then walks you through it.
             </p>
             <div className="welcome-actions">
@@ -48,10 +48,10 @@ export default function Welcome({ onEnter, onDemo }) {
                 Try a guided session
               </button>
             </div>
-            <p className="welcome-fine">Speak in your language. Ground detects it automatically, even when you switch. The guided session is a scripted demonstration.</p>
+            <p className="welcome-fine">Speak in your language. Baat detects it automatically, even when you switch. The guided session is a scripted demonstration.</p>
           </div>
 
-          <figure className="welcome-vignette" aria-label="Illustration: your cursor and Ground’s cursor on the same page">
+          <figure className="welcome-vignette" aria-label="Illustration: your cursor and Baat’s cursor on the same page">
             <div className="vig-page">
               <div className="vig-nav">
                 <i />
@@ -84,7 +84,7 @@ export default function Welcome({ onEnter, onDemo }) {
             </div>
             <div className="vig-cursor ground">
               <CursorGlyph who="ground" size={18} />
-              <span>Ground · this button?</span>
+              <span>Baat · this button?</span>
             </div>
             <figcaption className="vig-bubbles">
               <p className="bubble you">“Can this feel warmer?”</p>
@@ -101,7 +101,7 @@ export default function Welcome({ onEnter, onDemo }) {
           </li>
           <li>
             <span>02</span>
-            <b>Ground points back</b>
+            <b>Baat points back</b>
             <p>Its own cursor confirms what it understood before it touches anything.</p>
           </li>
           <li>
@@ -112,7 +112,7 @@ export default function Welcome({ onEnter, onDemo }) {
         </ol>
 
         <footer className="welcome-foot">
-          Built on research into conversational grounding (Clark &amp; Brennan, 1991) and shared visual workspaces (Gergle, Kraut &amp; Fussell, 2013).
+          Your voice. Your direction. A page you can make your own.
         </footer>
       </div>
     </div>

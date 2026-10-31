@@ -16,7 +16,7 @@ export function pageTour(elements, language = 'en-IN') {
       seen.add(key);
       return true;
     })
-    .slice(0, 7)
+    .slice(0, 150)
     .map((e) => ({
       id: e.id,
       label: label(e),
@@ -33,6 +33,7 @@ export function changedTargets(
   after,
   requested = [],
   language = 'en-IN',
+  limit = 6,
 ) {
   const old = new Map(before.map((e) => [e.id, e]));
   const changed = after.filter((e) => {
@@ -98,7 +99,7 @@ export function changedTargets(
       seen.add(text);
       return true;
     })
-    .slice(0, 6)
+    .slice(0, limit)
     .map((e) => ({
       id: e.id,
       label: label(e),
@@ -154,4 +155,45 @@ export function comparisonChoice(text) {
   )
     return 1;
   return null;
+}
+
+export function changeReceipt(
+  before,
+  after,
+  requested = [],
+  language = 'en-IN',
+) {
+  const present = new Set(after.map((e) => e.id));
+  const removed = before
+    .filter(
+      (e) =>
+        e.id &&
+        !present.has(e.id) &&
+        [
+          'h1',
+          'h2',
+          'h3',
+          'p',
+          'a',
+          'button',
+          'img',
+          'section',
+          'article',
+        ].includes(e.tag),
+    )
+    .map((e) => ({
+      id: e.id,
+      label: label(e),
+      description:
+        language === 'hinglish'
+          ? `“${label(e)}” remove कर दिया.`
+          : language === 'hi-IN'
+            ? `“${label(e)}” हटा दिया है।`
+            : `Removed ${e.kind || e.tag}: ${label(e)}`,
+      removed: true,
+    }));
+  return [
+    ...changedTargets(before, after, requested, language, 150),
+    ...removed,
+  ].slice(0, 150);
 }

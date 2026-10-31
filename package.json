@@ -1,6 +1,6 @@
 {
-  "name": "common-ground",
-  "version": "0.3.0",
+  "name": "baatelier",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {

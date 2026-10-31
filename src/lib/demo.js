@@ -3,7 +3,7 @@
 
 export const DEMO_STEPS = [
   {
-    caption: 'You point at the headline while speaking. Common Ground records what you were hovering.',
+    caption: 'You point at the headline while speaking. Baatelier records what you were hovering.',
     wait: 2600,
     run: (d) => {
       d.simulateHover('hero-title', 'Heading');
@@ -11,7 +11,7 @@ export const DEMO_STEPS = [
     },
   },
   {
-    caption: '“This” is ambiguous, so Ground points back to check the scope instead of guessing.',
+    caption: '“This” is ambiguous, so Baat points back to check the scope instead of guessing.',
     wait: 4200,
     run: (d) => {
       d.simulateHover(null);
@@ -41,7 +41,7 @@ export const DEMO_STEPS = [
     },
   },
   {
-    caption: 'Ground makes a real, reversible change to the page and creates a new version.',
+    caption: 'Baat makes a real, reversible change to the page and creates a new version.',
     wait: 4600,
     run: (d) => {
       d.applyEdit(
@@ -66,7 +66,7 @@ export const DEMO_STEPS = [
     },
   },
   {
-    caption: 'Ground walks you through exactly what changed. Keep it, undo it or refine it from the bar.',
+    caption: 'Baat walks you through exactly what changed. Keep it, undo it or refine it from the bar.',
     wait: 5200,
     run: (d) => {
       d.select(null);

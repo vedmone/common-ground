@@ -1,4 +1,4 @@
-// Grounding helpers: map model targets to real preview elements, and run Ground's pointer through
+// Baating helpers: map model targets to real preview elements, and run Baat's pointer through
 // them in step with the spoken reply.
 
 const STOP = new Set(['the', 'a', 'an', 'this', 'that', 'of', 'and', 'to', 'in', 'on', 'for', 'with', 'is', 'it', 'section', 'element']);
