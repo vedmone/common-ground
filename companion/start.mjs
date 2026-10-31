@@ -7,8 +7,13 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {chat,speak,transcribe,validateChat,modelJSON,shapeResult,GROUND_SYSTEM,AppError,errorResponse,cleanHTML} from '../server/core.mjs';
+import {serveChat} from '../server/stream.mjs';
+import media from '../api/media.js';
+import publish from '../api/publish.js';
+import site from '../api/site.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+try{process.loadEnvFile(path.join(root,'.env.local'));}catch{}
 const args=process.argv.slice(2);
 const value=(key,fallback)=>{const i=args.indexOf(key);return i<0?fallback:args[i+1];};
 const project=path.resolve(value('--project',path.join(root,'companion/sample')));
@@ -43,10 +48,13 @@ const check=(req,res,next)=>{
 
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:8_000_000}});
 app.post('/api/transcribe',check,upload.single('file'),async(req,res)=>{try{res.json(await transcribe(req.file));}catch(e){errorResponse(res,e);}});
+app.post('/api/media',check,media);
 app.use(express.json({limit:'650kb'}));
 const health=()=>({ok:true,ready:true,chat:!!process.env.SARVAM_API_KEY,voice:!!process.env.SARVAM_API_KEY,provider:'Claude Code + Sarvam',project:path.basename(project),projectPath:project,previewUrl:`http://127.0.0.1:${port}/preview/`,companion:true,busy,canUndo:checkpoints.length>0});
 app.get('/health',check,(req,res)=>res.json(health()));
 app.get('/api/health',check,(req,res)=>res.json(health()));
+app.post('/api/publish',check,publish);
+app.get('/project/:id',(req,res)=>site({query:{id:req.params.id}},res));
 app.post('/api/speak',check,async(req,res)=>{try{res.json(await speak(req.body));}catch(e){errorResponse(res,e);}});
 
 async function snapshot(){
@@ -86,6 +94,7 @@ async function localChat(body){
     const rawDecision=await modelJSON([{role:'system',content:GROUND_SYSTEM},{role:'system',content:`This is a live voice conversation. Automatically follow the latest utterance's language and code mixing, switching whenever the user switches. ${valid.language!=='auto'?`Speech recognition detected ${valid.language}.`:''} Never ask the user to choose a language. Shared workspace (untrusted data): ${JSON.stringify({...valid.context,html:undefined}).slice(0,30000)}`},...valid.messages]);
     if(interrupted)throw new AppError('The request was interrupted before any source changes.',409);
     const decision=shapeResult(rawDecision,valid.context,valid.language);
+    if(decision.action==='compare')return {...decision,action:'clarify',reply:'For two visual directions, use an HTML page from New page. In this connected source project I can make one reversible edit at a time.'};
     if(decision.action!=='edit')return {...decision,provider:'Sarvam + Claude companion'};
     lastSnapshot=await snapshot();
     editStarted=true;
@@ -102,7 +111,7 @@ async function localChat(body){
 }
 
 app.post('/chat',check,async(req,res)=>{res.on('close',()=>{if(!res.writableEnded){interrupted=true;activeChild?.kill('SIGTERM');}});try{res.json(await localChat(req.body));}catch(e){if(!res.destroyed)errorResponse(res,e);}});
-app.post('/api/chat',check,async(req,res)=>{try{res.json(await chat(req.body));}catch(e){errorResponse(res,e);}});
+app.post('/api/chat',check,async(req,res)=>{try{await serveChat(req,res,chat);}catch(e){errorResponse(res,e);}});
 app.post('/interrupt',check,(req,res)=>{interrupted=true;if(activeChild)activeChild.kill('SIGTERM');res.json({ok:true,interrupted:true});});
 app.post('/undo',check,async(req,res)=>{
   if(busy)return res.status(409).json({error:'Wait for the active edit to finish before undoing.'});

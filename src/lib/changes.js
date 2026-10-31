@@ -1,0 +1,118 @@
+const normalize = (s) =>
+  String(s || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+const label = (e) =>
+  normalize(e.label || e.text || e.kind || e.tag).slice(0, 85);
+export function pageTour(elements) {
+  const meaningful = elements.filter(
+    (e) => e.id && e.text && ['nav', 'h1', 'h2', 'footer'].includes(e.tag),
+  );
+  const seen = new Set();
+  return meaningful
+    .filter((e) => {
+      const key = normalize(e.text);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 7)
+    .map((e) => ({
+      id: e.id,
+      label: label(e),
+      description: `${e.tag === 'h1' ? 'The main headline' : e.tag === 'nav' ? 'Navigation' : e.tag === 'footer' ? 'The footer' : 'This section'}: ${label(e)}.`,
+    }));
+}
+export function changedTargets(before, after, requested = []) {
+  const old = new Map(before.map((e) => [e.id, e]));
+  const changed = after.filter((e) => {
+    if (
+      ![
+        'h1',
+        'h2',
+        'h3',
+        'button',
+        'a',
+        'p',
+        'img',
+        'svg',
+        'section',
+        'article',
+      ].includes(e.tag)
+    )
+      return false;
+    const prev = old.get(e.id);
+    return (
+      !prev ||
+      normalize(prev.text) !== normalize(e.text) ||
+      JSON.stringify(prev.styles || {}) !== JSON.stringify(e.styles || {})
+    );
+  });
+  const priority = (e) =>
+    requested.some((c) => c.id === e.id)
+      ? 0
+      : /^(h[1-3]|button)$/.test(e.tag)
+        ? 1
+        : 2;
+  const byId = new Map(after.map((e) => [e.id, e]));
+  const isDescendant = (child, parentId) => {
+    let node = child;
+    for (let depth = 0; depth < 30 && node?.parentId; depth++) {
+      if (node.parentId === parentId) return true;
+      node = byId.get(node.parentId);
+    }
+    return false;
+  };
+  const seen = new Set();
+  return changed
+    .filter((e) => {
+      const previous = old.get(e.id);
+      if (
+        !previous ||
+        !['section', 'article'].includes(e.tag) ||
+        requested.some((c) => c.id === e.id)
+      )
+        return true;
+      if (
+        JSON.stringify(previous.styles || {}) !== JSON.stringify(e.styles || {})
+      )
+        return true;
+      return !changed.some(
+        (child) => child.id !== e.id && isDescendant(child, e.id),
+      );
+    })
+    .sort((a, b) => priority(a) - priority(b))
+    .filter((e) => {
+      const text = label(e);
+      if (seen.has(text)) return false;
+      seen.add(text);
+      return true;
+    })
+    .slice(0, 6)
+    .map((e) => ({
+      id: e.id,
+      label: label(e),
+      description:
+        requested.find((c) => c.id === e.id)?.description ||
+        `Updated ${e.kind || e.tag}: ${label(e)}`,
+    }));
+}
+export function comparisonChoice(text) {
+  const value = String(text)
+    .trim()
+    .replace(/[.!?।]+$/, '')
+    .toLowerCase();
+  if (
+    /^(?:(?:i (?:like|prefer|choose|want)|use|keep|choose|pick|go with)\s+)?(?:(?:option|version|direction)\s+)?(?:a|1|one|first(?: one)?|pehla(?: wala)?|पहला)$/.test(
+      value,
+    )
+  )
+    return 0;
+  if (
+    /^(?:(?:i (?:like|prefer|choose|want)|use|keep|choose|pick|go with)\s+)?(?:(?:option|version|direction)\s+)?(?:b|2|two|second(?: one)?|doosra(?: wala)?|दूसरा)$/.test(
+      value,
+    )
+  )
+    return 1;
+  return null;
+}

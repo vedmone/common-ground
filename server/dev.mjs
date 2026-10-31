@@ -4,10 +4,16 @@ import chat from '../api/chat.js';
 import speak from '../api/speak.js';
 import transcribe from '../api/transcribe.js';
 import health from '../api/health.js';
+import media from '../api/media.js';
+import publish from '../api/publish.js';
+import site from '../api/site.js';
+try{process.loadEnvFile('.env.local');}catch{}
 const app=express();
 app.post('/api/transcribe',transcribe);
+app.post('/api/media',media);
 app.use(express.json({limit:'650kb'}));
 app.all('/api/chat',chat);app.all('/api/speak',speak);app.get('/api/health',health);
+app.all('/api/publish',publish);app.get('/project/:id',(req,res)=>site({query:{id:req.params.id}},res));
 const vite=await createViteServer({server:{middlewareMode:true},appType:'spa'});
 app.use(vite.middlewares);
 app.listen(Number(process.env.PORT||4320),'127.0.0.1',()=>console.log('Common Ground → http://127.0.0.1:4320'));

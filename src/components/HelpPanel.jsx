@@ -52,8 +52,12 @@ export default function HelpPanel({ onClose, onDemo, onWelcome }) {
         </dl>
       </section>
       <section className="help-section">
+        <h3>Create, compare and publish</h3>
+        <p className="setup-copy">New page starts a fresh canvas or builds from a brief. HTML editor lets you write, import and apply source. Images uploads a photo that you can place or restyle on the call. Turn on Two directions for alternatives, then say “I prefer B” or click the element you prefer. Tour page walks through actual sections; Publish gives the current version a public link under /project/.</p>
+      </section>
+      <section className="help-section">
         <h3>Privacy</h3>
-        <p className="setup-copy">Sessions and versions are saved in this browser. Your spoken turns go to Sarvam for transcription and voice; your words, page source and element references go to the configured AI provider. Hosted examples run in an isolated preview. The local companion runs your own trusted project and uses Claude Code for source edits.</p>
+        <p className="setup-copy">Sessions and versions are saved in this browser. Your spoken turns go to Sarvam for transcription and voice; your words, page source and element references go to the configured AI provider. Uploaded images and pages you publish are stored publicly on Vercel. Hosted examples run in an isolated preview. The local companion runs your own trusted project and uses Claude Code for source edits.</p>
       </section>
       <div className="setup-actions">
         <button type="button" className="btn btn-primary btn-sm" onClick={onDemo}>

@@ -8,6 +8,13 @@ Common Ground binds a conversation to the interface being discussed. Your cursor
 
 ## What works
 
+- Create named HTML landing pages from a blank canvas or an AI brief; edit or import HTML directly.
+- Streaming replies and real build stages, with early spoken intent and short updates during longer edits.
+- Two alternative previews from the same base; choose by voice, button, or clicking the preferred element. Only the chosen version enters history.
+- Upload and replace images, ask for image placement and circular/bolder styling, and reuse uploaded assets on the call.
+- Dynamic website tours and change highlights based on actual element inventory and computed-style changes.
+- Publish a page to `/project/<name>-<unique-suffix>` on the app’s Vercel domain; update the same link with a browser-held ownership key.
+
 - Element hover, selection, parent targeting and reciprocal AI pointing.
 - Automatic speech-language detection on every turn, including English/Hindi/Hinglish; 11 supported Indian language locales.
 - Microphone recording, speech detection, Saaras transcription and Bulbul speech output.
@@ -67,9 +74,19 @@ vercel env add SARVAM_API_KEY production
 vercel --prod
 ```
 
+## Image uploads and publishing
+
+The hosted build has a dedicated Vercel Blob store. For a new installation, connect one with `vercel blob create-store your-store --access public --yes`, then pull its server environment. The server uses `BLOB_READ_WRITE_TOKEN`; never expose it in the client. Set `PUBLIC_SITE_ORIGIN` to your app's public origin when running a fork or publishing from localhost.
+
+Uploaded PNG/JPEG/WebP/GIF assets are public and limited to 3 MB. Published pages are sanitized HTML served under `/project/<slug>-<random-suffix>` with a restrictive content policy. A random browser-held key authorizes updates; the server stores its hash, rejects a different key, and keeps the URL stable across updates. Clearing browser data can remove that update key. This release uses project paths on the studio's Vercel domain, rather than creating a separate Vercel project/subdomain per page.
+
+Two-direction comparison, image insertion and publishing operate in the HTML workspace. A connected source repository retains its existing single-edit/checkpoint workflow.
+
 ## Architecture
 
 `src/` contains the room, conversation, voice lifecycle and preview bridge. `server/core.mjs` validates requests, interprets intent and generates previews. `api/` exposes chat, transcription, speech and health functions. `companion/` connects a local repository and Claude Code. `test/` checks parsing, request bounds and generated-source handling.
+
+Chat responses stream as NDJSON: early reply, grounded intent, build/check stages, generated-character counts, and the final validated result. Provider SSE is decoded incrementally with cancellation. This removes the wait for complete HTML before the first conversational response; actual latency still depends on provider and network conditions.
 
 Preview documents are isolated in sandboxed iframes. Generated scripts, event handlers, embedded frames and navigation payloads are removed. The bridge supplies stable element identifiers for references across changes. A failed or incomplete model response leaves the current version intact.
 

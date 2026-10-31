@@ -233,7 +233,7 @@ export class VoiceSession {
       this.speechFrames = Math.max(0, this.speechFrames - 1);
       if (this.speaking) {
         this.silenceMs += FRAME_MS;
-        if (this.silenceMs >= 1050) {
+        if (this.silenceMs >= 700) {
           const enough = this.voicedMs >= 350;
           this.speaking = false;
           if (enough) {

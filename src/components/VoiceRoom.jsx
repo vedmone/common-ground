@@ -67,7 +67,7 @@ function MicBars({ subscribe, active }) {
 function groundState({ call, turn, transcribing, speaking, voiceAvailable, healthStatus }) {
   if (call.connecting) return { key: 'connecting', label: 'Joining the call…' };
   if (turn.phase === 'applying') return { key: 'thinking', label: 'Applying the change to the page' };
-  if (turn.phase === 'thinking') return { key: 'thinking', label: 'Thinking it through' };
+  if (turn.phase !== 'idle') return { key: 'thinking', label: turn.label || 'Thinking it through' };
   if (speaking) return { key: 'speaking', label: 'Speaking' };
   if (transcribing) return { key: 'listening', label: 'Listening closely' };
   if (call.active) return { key: 'listening', label: call.speakerMuted ? 'Listening · voice off, captions on' : 'Listening' };
@@ -276,9 +276,10 @@ function Captions({ messages, turn, transcribing, call, voiceAvailable, speaking
               <i />
               <i />
             </span>
-            {turn.phase === 'applying' ? 'Loading the new version into the page' : 'Thinking'}
+            {turn.label || (turn.phase === 'applying' ? 'Loading the new version into the page' : 'Thinking')}
             <Elapsed since={turn.startedAt} />
           </p>
+          {turn.reply&&<p className="live-reply">{turn.reply}</p>}
         </div>
       )}
       {!call.active && items.length > 0 && turn.phase === 'idle' && !transcribing && <p className="cap-paused">Captions from your last exchange. Join the call to keep talking.</p>}

@@ -125,6 +125,7 @@ function cleanMessage(m) {
     provider: str(m.provider, 80) ? m.provider : '',
     language: /^(en|hi|bn|gu|kn|ml|mr|od|pa|ta|te)-IN$/.test(m.language || '') ? m.language : 'auto',
     scripted: !!m.scripted,
+    progress: !!m.progress,
     local: !!m.local,
     error: str(m.error, 600) ? m.error : '',
     tone: ['info', 'error', 'success'].includes(m.tone) ? m.tone : undefined,

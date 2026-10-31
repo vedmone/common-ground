@@ -63,7 +63,7 @@ function ProjectMenu({ project, projects, companion, onSwitch, onConnect }) {
       </button>
       {open && (
         <div className="menu" role="menu">
-          <div className="menu-label">Example projects</div>
+          <div className="menu-label">Your pages &amp; examples</div>
           {projects.map((p) => (
             <button
               type="button"

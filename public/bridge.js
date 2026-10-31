@@ -124,7 +124,7 @@
     return {
       color: cs.color, background: cs.backgroundColor, fontSize: cs.fontSize, fontWeight: cs.fontWeight,
       fontFamily: (cs.fontFamily || '').split(',')[0].replace(/["']/g, ''), padding: cs.padding,
-      borderRadius: cs.borderRadius, display: cs.display
+      borderRadius: cs.borderRadius, display: cs.display,objectFit:cs.objectFit,border:cs.border,boxShadow:cs.boxShadow,filter:cs.filter
     };
   }
   function cgParent(el) {
