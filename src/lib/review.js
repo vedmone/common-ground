@@ -71,7 +71,13 @@ export function reviewCommand(text, active = false) {
   )
     return { action: 'start', mode: 'changes' };
   if (
-    /(?:explain|describe|walk|tour|samjhao|समझाओ|बताओ).*(?:every|each|all|har ek|saare|हर|सारे).*(?:element|section|part|detail|चीज|हिस्स)|(?:every|each|all|har ek|हर).*(?:element|section).*(?:explain|why|kyun|समझाओ|क्यों)/.test(
+    /(?:saare|all|sabhi|सारे|सभी).*(?:changes|edits|बदलाव).*(?:explain|samjhao|batao|समझाओ|बताओ)/.test(
+      s,
+    )
+  )
+    return { action: 'start', mode: 'changes' };
+  if (
+    /(?:explain|describe|walk|tour|samjhao|समझाओ|बताओ).*(?:every|each|all|har ek|saare|हर|सारे).*(?:element|section|part|detail|चीज|हिस्स)|(?:every|each|all|har(?: ek)?|saare|सभी|सारे|हर).*(?:element|section).*(?:explain|why|kyun|समझाओ|क्यों)/.test(
       s,
     )
   )

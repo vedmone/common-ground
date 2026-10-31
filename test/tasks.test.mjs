@@ -120,6 +120,7 @@ test('work commands, informational questions and numbered task controls stay dis
     'Why does this look warm?',
     'Can you explain the spacing?',
     'Ye font kyun use kiya?',
+    'Is button ko explain karo',
   ])
     assert.equal(inputLane(s), 'conversation', s);
   for (const s of [

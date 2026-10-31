@@ -169,6 +169,13 @@ export function nextQueuedTask(tasks, paused, hasPage) {
 export function inputLane(text) {
   const value = String(text || '').trim();
   if (
+    /(?:explain|samjhao|समझाओ)/i.test(value) &&
+    !/^(?:please )?(?:add|make|change|replace|remove|build|create|update|move|redesign)\b/i.test(
+      value,
+    )
+  )
+    return 'conversation';
+  if (
     /^(?:(?:please|also|and)\s+)?(?:add|make|change|update|replace|create|build|redesign|move|remove|insert|put|use|set|increase|decrease|show me two|give (?:me|it|this|that).*(?:look|style|two|options|versions|directions)|(?:can|could|would) you (?:add|make|change|create|build|replace))\b/i.test(
       value,
     )

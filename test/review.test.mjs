@@ -31,12 +31,15 @@ test('natural voice requests choose a read-only page, element, task or change wa
     'Explain all elements',
     'Walk me through each element',
     'हर element समझाओ',
+    'Har element samjhao aur kyun banaya hai',
+    'Saare elements explain karo',
   ])
     assert.equal(reviewCommand(s)?.mode, 'elements', s);
   for (const s of [
     'Explain what all changes have been done',
     'What did you change?',
     'Kya kya change kiya?',
+    'Saare changes explain karo',
   ])
     assert.equal(reviewCommand(s)?.mode, 'changes', s);
   assert.deepEqual(reviewCommand('Explain task two'), {
