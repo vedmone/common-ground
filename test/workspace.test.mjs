@@ -231,8 +231,14 @@ test('create-from-scratch always generates a full page even if intent includes s
   process.env.SARVAM_API_KEY = 'test-key';
   const complete =
     '<!doctype html><html><head><title>New studio</title></head><body><h1>A complete new page</h1><section><h2>Workshops</h2><p>Made by hand with real clay.</p></section><section><h2>Visit us</h2><p>Join the next workshop in Jaipur.</p></section></body></html>';
-  globalThis.fetch = async () => {
+  globalThis.fetch = async (_url, options) => {
     calls++;
+    if (calls === 2)
+      assert.ok(
+        JSON.parse(options.body)
+          .messages.at(-1)
+          .content.includes('Build a landing page for Clay House in Jaipur.'),
+      );
     return Response.json({
       choices: [
         {
@@ -255,7 +261,12 @@ test('create-from-scratch always generates a full page even if intent includes s
   try {
     const output = await chat({
       task: 'create',
-      messages: [{ role: 'user', content: 'Build a studio landing page.' }],
+      messages: [
+        {
+          role: 'user',
+          content: 'Build a landing page for Clay House in Jaipur.',
+        },
+      ],
       context: {
         html: blankHTML(),
         elements: [{ id: 'hero-heading', tag: 'h1', text: 'Untitled page' }],

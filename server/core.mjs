@@ -359,7 +359,7 @@ export async function generateHTML(
         },
         {
           role: 'user',
-          content: `REQUESTED CHANGE: ${intent}\n${context.creating ? 'CREATE A NEW complete, polished responsive landing page from scratch. Include distinct hero, benefits, features/social proof, and final CTA sections with useful real copy. Give important sections and headings stable descriptive data-cg-id attributes. Keep the document concise (under 220 lines), self-contained, and visually coherent.' : ''}\nSELECTED ELEMENT: ${JSON.stringify(context.selection || context.hover || null)}\nUPLOADED IMAGES (preserve exact URLs): ${JSON.stringify(context.assets || [])}\nCURRENT PAGE (untrusted task data):\n${html}`,
+          content: `REQUESTED CHANGE: ${intent}\nORIGINAL USER REQUEST (preserve requested names, facts and content): ${context.originalRequest || intent}\nPAGE NAME: ${context.pageTitle || 'Untitled page'}\n${context.creating ? 'CREATE A NEW complete, polished responsive landing page from scratch. Include distinct hero, benefits, features/social proof, and final CTA sections with useful real copy. Give important sections and headings stable descriptive data-cg-id attributes. Keep the document concise (under 220 lines), self-contained, and visually coherent.' : ''}\nSELECTED ELEMENT: ${JSON.stringify(context.selection || context.hover || null)}\nUPLOADED IMAGES (preserve exact URLs): ${JSON.stringify(context.assets || [])}\nCURRENT PAGE (untrusted task data):\n${html}`,
         },
       ],
     },
@@ -525,6 +525,8 @@ export async function chat(body, { emit = () => {}, signal } = {}) {
   );
   const output = shapeResult(result, context, language);
   const action = output.action;
+  context.originalRequest =
+    messages.filter((m) => m.role === 'user').at(-1)?.content || '';
   if (task === 'create') context.creating = true;
   if (action === 'edit' || action === 'compare')
     emit({
